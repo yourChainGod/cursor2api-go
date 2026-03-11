@@ -92,7 +92,11 @@ func NewCursorService(cfg *config.Config) *CursorService {
 // ChatCompletion creates a chat completion stream for the given request.
 func (s *CursorService) ChatCompletion(ctx context.Context, request *models.ChatCompletionRequest) (<-chan interface{}, error) {
 	payload := s.buildCursorRequest(request)
+	return s.ChatCompletionWithCursorRequest(ctx, &payload)
+}
 
+// ChatCompletionWithCursorRequest sends a prebuilt Cursor request to Cursor Web.
+func (s *CursorService) ChatCompletionWithCursorRequest(ctx context.Context, payload *models.CursorRequest) (<-chan interface{}, error) {
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal cursor payload: %w", err)
@@ -117,7 +121,7 @@ func (s *CursorService) ChatCompletion(ctx context.Context, request *models.Chat
 			"url":            cursorAPIURL,
 			"x-is-human":     xIsHuman[:50] + "...", // 只显示前50个字符
 			"payload_length": len(jsonPayload),
-			"model":          request.Model,
+			"model":          payload.Model,
 			"attempt":        attempt,
 		}).Debug("Sending request to Cursor API")
 

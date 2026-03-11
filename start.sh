@@ -25,13 +25,13 @@ print_header() {
 # 检查Go环境
 check_go() {
     if ! command -v go &> /dev/null; then
-        echo -e "${RED}❌ Go 未安装，请先安装 Go 1.21 或更高版本${NC}"
+        echo -e "${RED}❌ Go 未安装，请先安装 Go 1.24 或更高版本${NC}"
         echo -e "${YELLOW}💡 安装方法: https://golang.org/dl/${NC}"
         exit 1
     fi
 
     GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-    REQUIRED_VERSION="1.21"
+    REQUIRED_VERSION="1.24"
 
     if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$GO_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
         echo -e "${RED}❌ Go 版本 $GO_VERSION 过低，请安装 Go $REQUIRED_VERSION 或更高版本${NC}"
@@ -71,15 +71,25 @@ DEBUG=false
 
 # API配置
 API_KEY=0000
-MODELS=gpt-5.1,gpt-5,gpt-5-codex,gpt-5-mini,gpt-5-nano,gpt-4.1,gpt-4o,claude-3.5-sonnet,claude-3.5-haiku,claude-3.7-sonnet,claude-4-sonnet,claude-4.5-sonnet,claude-4-opus,claude-4.1-opus,gemini-2.5-pro,gemini-2.5-flash,gemini-3.0-pro,o3,o4-mini,deepseek-r1,deepseek-v3.1,kimi-k2-instruct,grok-3
+MODELS=claude-sonnet-4.6,claude-sonnet-4-5-20250929,claude-sonnet-4-20250514,claude-3-5-sonnet-20241022
 SYSTEM_PROMPT_INJECT=
 
 # 请求配置
-TIMEOUT=30
+TIMEOUT=60
+MAX_INPUT_LENGTH=200000
 USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+UNMASKED_VENDOR_WEBGL=Google Inc. (Intel)
+UNMASKED_RENDERER_WEBGL=ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)
 
 # Cursor配置
-SCRIPT_URL=https://cursor.com/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js?i=0&v=3&h=cursor.com
+SCRIPT_URL=https://cursor.com/_next/static/chunks/pages/_app.js
+
+# Vision / OCR配置
+VISION_ENABLED=false
+VISION_MODE=ocr
+VISION_BASE_URL=https://api.openai.com/v1/chat/completions
+VISION_API_KEY=
+VISION_MODEL=gpt-4o-mini
 EOF
         echo -e "${GREEN}✅ 默认 .env 文件已创建${NC}"
     else
@@ -87,10 +97,24 @@ EOF
     fi
 }
 
+# 安装 Node 运行时依赖（用于 OCR / JS helper）
+install_node_deps() {
+    if [ -f package.json ]; then
+        if [ ! -d node_modules ] || [ ! -f node_modules/tesseract.js/package.json ]; then
+            echo -e "${BLUE}📦 正在安装 Node 运行时依赖...${NC}"
+            npm install --omit=dev
+        else
+            echo -e "${GREEN}✅ Node 运行时依赖已就绪${NC}"
+        fi
+    fi
+}
+
 # 构建应用
 build_app() {
     echo -e "${BLUE}📦 正在下载 Go 依赖...${NC}"
     go mod download
+
+    install_node_deps
 
     echo -e "${BLUE}🔨 正在编译 Go 应用...${NC}"
     go build -o cursor2api-go .

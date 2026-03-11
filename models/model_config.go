@@ -39,6 +39,27 @@ func GetModelConfigs() map[string]ModelConfig {
 			ContextWindow: 200000,
 			CursorModel:   "anthropic/claude-sonnet-4.6",
 		},
+		"claude-sonnet-4-5-20250929": {
+			ID:            "claude-sonnet-4-5-20250929",
+			Provider:      "Anthropic",
+			MaxTokens:     200000,
+			ContextWindow: 200000,
+			CursorModel:   "anthropic/claude-sonnet-4.6",
+		},
+		"claude-sonnet-4-20250514": {
+			ID:            "claude-sonnet-4-20250514",
+			Provider:      "Anthropic",
+			MaxTokens:     200000,
+			ContextWindow: 200000,
+			CursorModel:   "anthropic/claude-sonnet-4.6",
+		},
+		"claude-3-5-sonnet-20241022": {
+			ID:            "claude-3-5-sonnet-20241022",
+			Provider:      "Anthropic",
+			MaxTokens:     200000,
+			ContextWindow: 200000,
+			CursorModel:   "anthropic/claude-sonnet-4.6",
+		},
 	}
 }
 
@@ -58,6 +79,28 @@ func GetCursorModel(modelID string) string {
 	}
 	// 如果没有配置映射，返回原始模型名
 	return modelID
+}
+
+// ResolveCursorModel resolves a requested API model to a concrete Cursor backend model,
+// falling back to the configured default model when needed.
+func ResolveCursorModel(modelID, fallbackModelID string) string {
+	if resolved := GetCursorModel(modelID); resolved != "" && resolved != modelID {
+		return resolved
+	}
+	if config, exists := GetModelConfig(modelID); exists && config.CursorModel != "" {
+		return config.CursorModel
+	}
+	if fallbackModelID != "" {
+		if config, exists := GetModelConfig(fallbackModelID); exists && config.CursorModel != "" {
+			return config.CursorModel
+		}
+		if fallbackModelID != modelID {
+			if resolved := GetCursorModel(fallbackModelID); resolved != "" {
+				return resolved
+			}
+		}
+	}
+	return GetCursorModel(modelID)
 }
 
 // GetMaxTokensForModel 获取指定模型的最大token数

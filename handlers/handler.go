@@ -1,43 +1,31 @@
-// Copyright (c) 2025-2026 libaxuan
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 package handlers
 
 import (
+	"bytes"
+	"context"
+	"cursor2api-go/compat"
 	"cursor2api-go/config"
 	"cursor2api-go/middleware"
 	"cursor2api-go/models"
 	"cursor2api-go/services"
 	"cursor2api-go/utils"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 )
+
+type cursorExecutor interface {
+	ChatCompletionWithCursorRequest(ctx context.Context, payload *models.CursorRequest) (<-chan interface{}, error)
+}
 
 // Handler 处理器结构
 type Handler struct {
 	config        *config.Config
-	cursorService *services.CursorService
+	cursorService cursorExecutor
 	docsContent   []byte
 }
 
@@ -45,120 +33,12 @@ type Handler struct {
 func NewHandler(cfg *config.Config) *Handler {
 	cursorService := services.NewCursorService(cfg)
 
-	// 预加载文档内容
 	docsPath := "static/docs.html"
 	var docsContent []byte
-
 	if data, err := os.ReadFile(docsPath); err == nil {
 		docsContent = data
 	} else {
-		// 如果文件不存在，使用默认的简单HTML页面
-		simpleHTML := `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cursor2API - Go Version</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 800px;
-            margin: 50px auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #333;
-            border-bottom: 2px solid #007bff;
-            padding-bottom: 10px;
-        }
-        .info {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-            border-left: 4px solid #007bff;
-        }
-        code {
-            background: #e9ecef;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: 'Courier New', monospace;
-        }
-        .endpoint {
-            background: #e3f2fd;
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
-            border-left: 3px solid #2196f3;
-        }
-        .status-ok {
-            color: #28a745;
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🚀 Cursor2API - Go Version</h1>
-        
-        <div class="info">
-            <p><strong>Status:</strong> <span class="status-ok">✅ Running</span></p>
-            <p><strong>Version:</strong> Go Implementation</p>
-            <p><strong>Description:</strong> OpenAI-compatible API proxy for Cursor AI</p>
-        </div>
-        
-        <div class="info">
-            <h3>📡 Available Endpoints:</h3>
-            <div class="endpoint">
-                <strong>GET</strong> <code>/v1/models</code><br>
-                <small>List available AI models</small>
-            </div>
-            <div class="endpoint">
-                <strong>POST</strong> <code>/v1/chat/completions</code><br>
-                <small>Create chat completion (supports streaming)</small>
-            </div>
-            <div class="endpoint">
-                <strong>GET</strong> <code>/health</code><br>
-                <small>Health check endpoint</small>
-            </div>
-        </div>
-        
-        <div class="info">
-            <h3>🔐 Authentication:</h3>
-            <p>Use Bearer token authentication:</p>
-            <code>Authorization: Bearer YOUR_API_KEY</code>
-            <p><small>Default API key: <code>0000</code> (change via API_KEY environment variable)</small></p>
-        </div>
-        
-        <div class="info">
-            <h3>💻 Example Usage:</h3>
-            <pre><code>curl -X POST http://localhost:8002/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer 0000" \
-  -d '{
-    "model": "claude-sonnet-4.6",
-    "messages": [
-      {"role": "user", "content": "Hello!"}
-    ]
-  }'</code></pre>
-        </div>
-        
-        <div class="info">
-            <p><strong>Repository:</strong> <a href="https://github.com/cursor2api/cursor2api-go">cursor2api-go</a></p>
-            <p><strong>Documentation:</strong> OpenAI API compatible</p>
-        </div>
-    </div>
-</body>
-</html>`
-		docsContent = []byte(simpleHTML)
+		docsContent = []byte(defaultDocsHTML)
 	}
 
 	return &Handler{
@@ -166,92 +46,514 @@ func NewHandler(cfg *config.Config) *Handler {
 		cursorService: cursorService,
 		docsContent:   docsContent,
 	}
-
 }
 
 // ListModels 列出可用模型
 func (h *Handler) ListModels(c *gin.Context) {
 	modelNames := h.config.GetModels()
 	modelList := make([]models.Model, 0, len(modelNames))
+	seen := map[string]bool{}
 
 	for _, modelID := range modelNames {
-		// 获取模型配置信息
-		modelConfig, exists := models.GetModelConfig(modelID)
+		if seen[modelID] {
+			continue
+		}
+		seen[modelID] = true
 
+		modelConfig, exists := models.GetModelConfig(modelID)
 		model := models.Model{
 			ID:      modelID,
 			Object:  "model",
 			Created: time.Now().Unix(),
 			OwnedBy: "cursor2api",
 		}
-
-		// 如果找到模型配置，添加max_tokens和context_window信息
 		if exists {
 			model.MaxTokens = modelConfig.MaxTokens
 			model.ContextWindow = modelConfig.ContextWindow
 		}
-
 		modelList = append(modelList, model)
 	}
 
-	response := models.ModelsResponse{
-		Object: "list",
-		Data:   modelList,
-	}
-
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, models.ModelsResponse{Object: "list", Data: modelList})
 }
 
-// ChatCompletions 处理聊天完成请求
+// ChatCompletions handles OpenAI chat completions with tool/responses compatibility.
 func (h *Handler) ChatCompletions(c *gin.Context) {
-	var request models.ChatCompletionRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		logrus.WithError(err).Error("Failed to bind request")
-		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
-			"Invalid request format",
-			"invalid_request_error",
-			"invalid_json",
-		))
+	var body compat.OpenAIChatRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse("Invalid request format", "invalid_request_error", "invalid_json"))
+		return
+	}
+	if len(body.Messages) == 0 {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse("Messages cannot be empty", "invalid_request_error", "missing_messages"))
 		return
 	}
 
-	// 验证模型
-	if !h.config.IsValidModel(request.Model) {
-		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
-			"Invalid model specified",
-			"invalid_request_error",
-			"model_not_found",
-		))
+	anthropicReq := compat.ConvertOpenAIToAnthropic(&body)
+	if isIdentityProbe(anthropicReq) {
+		if body.Stream {
+			h.handleOpenAIMockStream(c, &body, claudeMockIdentityResponse)
+		} else {
+			h.handleOpenAIMockNonStream(c, &body, claudeMockIdentityResponse)
+		}
+		return
+	}
+	if body.Stream {
+		h.streamOpenAI(c, &body, anthropicReq)
+		return
+	}
+	h.nonStreamOpenAI(c, &body, anthropicReq)
+}
+
+// Messages handles Anthropic Messages API compatibility.
+func (h *Handler) Messages(c *gin.Context) {
+	var body compat.AnthropicRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse("Invalid request format", "invalid_request_error", "invalid_json"))
+		return
+	}
+	if len(body.Messages) == 0 {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse("Messages cannot be empty", "invalid_request_error", "missing_messages"))
+		return
+	}
+	if body.MaxTokens <= 0 {
+		body.MaxTokens = 8192
+	}
+
+	if isIdentityProbe(&body) {
+		if body.Stream {
+			h.handleMockIdentityStream(c, &body, claudeMockIdentityResponse)
+		} else {
+			h.handleMockIdentityNonStream(c, &body, claudeMockIdentityResponse)
+		}
 		return
 	}
 
-	// 验证消息
-	if len(request.Messages) == 0 {
-		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
-			"Messages cannot be empty",
-			"invalid_request_error",
-			"missing_messages",
-		))
+	if body.Stream {
+		h.streamAnthropic(c, &body)
 		return
 	}
+	h.nonStreamAnthropic(c, &body)
+}
 
-	// 验证并调整max_tokens参数
-	request.MaxTokens = models.ValidateMaxTokens(request.Model, request.MaxTokens)
+// CountTokens provides a lightweight Anthropic-compatible token counter.
+func (h *Handler) CountTokens(c *gin.Context) {
+	var body compat.AnthropicRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse("Invalid request format", "invalid_request_error", "invalid_json"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"input_tokens": compat.EstimateAnthropicInputTokens(&body)})
+}
 
-	// 调用Cursor服务
-	chatGenerator, err := h.cursorService.ChatCompletion(c.Request.Context(), &request)
+// Responses handles OpenAI Responses API requests by converting them into Chat Completions.
+func (h *Handler) Responses(c *gin.Context) {
+	var raw map[string]interface{}
+	if err := c.ShouldBindJSON(&raw); err != nil {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse("Invalid request format", "invalid_request_error", "invalid_json"))
+		return
+	}
+	body := compat.ResponsesToChatCompletions(raw)
+	anthropicReq := compat.ConvertOpenAIToAnthropic(body)
+	if isIdentityProbe(anthropicReq) {
+		if body.Stream {
+			h.handleOpenAIMockStream(c, body, claudeMockIdentityResponse)
+		} else {
+			h.handleOpenAIMockNonStream(c, body, claudeMockIdentityResponse)
+		}
+		return
+	}
+	if body.Stream {
+		h.streamOpenAI(c, body, anthropicReq)
+		return
+	}
+	h.nonStreamOpenAI(c, body, anthropicReq)
+}
+
+func (h *Handler) nonStreamAnthropic(c *gin.Context, body *compat.AnthropicRequest) {
+	result, err := h.executeAnthropicRequest(c.Request.Context(), body)
 	if err != nil {
-		logrus.WithError(err).Error("Failed to create chat completion")
 		middleware.HandleError(c, err)
 		return
 	}
 
-	// 根据是否流式返回不同响应
-	if request.Stream {
-		utils.SafeStreamWrapper(utils.StreamChatCompletion, c, chatGenerator, request.Model)
-	} else {
-		utils.NonStreamChatCompletion(c, chatGenerator, request.Model)
+	content := make([]compat.AnthropicContentBlock, 0)
+	stopReason := "end_turn"
+	if len(body.Tools) > 0 && isTruncated(result.Text) {
+		stopReason = "max_tokens"
 	}
+	if len(body.Tools) > 0 {
+		toolCalls, cleanText := compat.ParseToolCalls(result.Text)
+		if len(toolCalls) > 0 {
+			stopReason = "tool_use"
+			if isRefusal(cleanText) {
+				cleanText = ""
+			}
+			cleanText = sanitizeResponse(cleanText)
+			if cleanText != "" {
+				content = append(content, compat.AnthropicContentBlock{Type: "text", Text: cleanText})
+			}
+			for _, tc := range toolCalls {
+				content = append(content, compat.AnthropicContentBlock{Type: "tool_use", ID: "toolu_" + randomID(24), Name: tc.Name, Input: tc.Arguments})
+			}
+		} else {
+			content = append(content, compat.AnthropicContentBlock{Type: "text", Text: sanitizeResponse(result.Text)})
+		}
+	} else {
+		content = append(content, compat.AnthropicContentBlock{Type: "text", Text: sanitizeResponse(result.Text)})
+	}
+
+	if len(content) == 0 {
+		content = append(content, compat.AnthropicContentBlock{Type: "text", Text: ""})
+	}
+
+	usage := compat.AnthropicUsage{InputTokens: compat.EstimateAnthropicInputTokens(body), OutputTokens: estimateOutputTokens(result)}
+	if result.Usage.PromptTokens > 0 {
+		usage.InputTokens = result.Usage.PromptTokens
+	}
+	if result.Usage.CompletionTokens > 0 {
+		usage.OutputTokens = result.Usage.CompletionTokens
+	}
+
+	response := compat.AnthropicResponse{
+		ID:           "msg_" + randomID(24),
+		Type:         "message",
+		Role:         "assistant",
+		Content:      content,
+		Model:        body.Model,
+		StopReason:   stopReason,
+		StopSequence: nil,
+		Usage:        usage,
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) streamAnthropic(c *gin.Context, body *compat.AnthropicRequest) {
+	result, err := h.executeAnthropicRequest(c.Request.Context(), body)
+	if err != nil {
+		middleware.HandleError(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	messageID := "msg_" + randomID(24)
+	writeAnthropicSSE(c, "message_start", gin.H{
+		"type": "message_start",
+		"message": gin.H{
+			"id":            messageID,
+			"type":          "message",
+			"role":          "assistant",
+			"content":       []interface{}{},
+			"model":         body.Model,
+			"stop_reason":   nil,
+			"stop_sequence": nil,
+			"usage": gin.H{
+				"input_tokens":  compat.EstimateAnthropicInputTokens(body),
+				"output_tokens": 0,
+			},
+		},
+	})
+
+	blockIndex := 0
+	stopReason := "end_turn"
+	if len(body.Tools) > 0 && isTruncated(result.Text) {
+		stopReason = "max_tokens"
+	}
+	if len(body.Tools) > 0 {
+		toolCalls, cleanText := compat.ParseToolCalls(result.Text)
+		if isRefusal(cleanText) {
+			cleanText = ""
+		}
+		cleanText = sanitizeResponse(cleanText)
+		if cleanText != "" {
+			writeAnthropicTextBlock(c, blockIndex, cleanText)
+			blockIndex++
+		}
+		if len(toolCalls) > 0 {
+			stopReason = "tool_use"
+			for _, tc := range toolCalls {
+				toolID := "toolu_" + randomID(24)
+				writeAnthropicSSE(c, "content_block_start", gin.H{
+					"type":  "content_block_start",
+					"index": blockIndex,
+					"content_block": gin.H{
+						"type":  "tool_use",
+						"id":    toolID,
+						"name":  tc.Name,
+						"input": gin.H{},
+					},
+				})
+				argsJSON, _ := json.Marshal(tc.Arguments)
+				for _, chunk := range chunkString(string(argsJSON), 128) {
+					writeAnthropicSSE(c, "content_block_delta", gin.H{
+						"type":  "content_block_delta",
+						"index": blockIndex,
+						"delta": gin.H{"type": "input_json_delta", "partial_json": chunk},
+					})
+				}
+				writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": blockIndex})
+				blockIndex++
+			}
+		} else if cleanText == "" {
+			writeAnthropicTextBlock(c, blockIndex, sanitizeResponse(result.Text))
+			blockIndex++
+		}
+	} else {
+		writeAnthropicTextBlock(c, blockIndex, sanitizeResponse(result.Text))
+		blockIndex++
+	}
+
+	writeAnthropicSSE(c, "message_delta", gin.H{
+		"type":  "message_delta",
+		"delta": gin.H{"stop_reason": stopReason, "stop_sequence": nil},
+		"usage": gin.H{"output_tokens": estimateOutputTokens(result)},
+	})
+	writeAnthropicSSE(c, "message_stop", gin.H{"type": "message_stop"})
+}
+
+func (h *Handler) nonStreamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, anthropicReq *compat.AnthropicRequest) {
+	result, err := h.executeAnthropicRequest(c.Request.Context(), anthropicReq)
+	if err != nil {
+		middleware.HandleError(c, err)
+		return
+	}
+
+	finishReason := "stop"
+	message := compat.OpenAIAssistantText{Role: "assistant", Content: sanitizeResponse(result.Text)}
+	if len(body.Tools) > 0 {
+		toolCalls, cleanText := compat.ParseToolCalls(result.Text)
+		if len(toolCalls) > 0 {
+			finishReason = "tool_calls"
+			if isRefusal(cleanText) {
+				cleanText = ""
+			}
+			message.Content = nullableString(sanitizeResponse(cleanText))
+			message.ToolCalls = make([]compat.OpenAIToolCall, 0, len(toolCalls))
+			for _, tc := range toolCalls {
+				argsJSON, _ := json.Marshal(tc.Arguments)
+				message.ToolCalls = append(message.ToolCalls, compat.OpenAIToolCall{
+					ID:   "call_" + randomID(24),
+					Type: "function",
+					Function: compat.OpenAIFunctionCall{
+						Name:      tc.Name,
+						Arguments: string(argsJSON),
+					},
+				})
+			}
+		}
+	}
+
+	promptTokens := compat.EstimateAnthropicInputTokens(anthropicReq)
+	if result.Usage.PromptTokens > 0 {
+		promptTokens = result.Usage.PromptTokens
+	}
+	completionTokens := estimateOutputTokens(result)
+	if result.Usage.CompletionTokens > 0 {
+		completionTokens = result.Usage.CompletionTokens
+	}
+
+	response := compat.OpenAIChatCompletion{
+		ID:      "chatcmpl-" + randomID(24),
+		Object:  "chat.completion",
+		Created: time.Now().Unix(),
+		Model:   body.Model,
+		Choices: []compat.OpenAIChatChoice{{Index: 0, Message: message, FinishReason: finishReason}},
+		Usage: compat.OpenAIUsage{
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      promptTokens + completionTokens,
+		},
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) streamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, anthropicReq *compat.AnthropicRequest) {
+	result, err := h.executeAnthropicRequest(c.Request.Context(), anthropicReq)
+	if err != nil {
+		middleware.HandleError(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	id := "chatcmpl-" + randomID(24)
+	created := time.Now().Unix()
+	writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   body.Model,
+		Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Role: "assistant", Content: ""}, FinishReason: nil}},
+	})
+
+	finishReason := "stop"
+	if len(body.Tools) > 0 {
+		toolCalls, cleanText := compat.ParseToolCalls(result.Text)
+		if isRefusal(cleanText) {
+			cleanText = ""
+		}
+		cleanText = sanitizeResponse(cleanText)
+		if cleanText != "" {
+			writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
+				ID:      id,
+				Object:  "chat.completion.chunk",
+				Created: created,
+				Model:   body.Model,
+				Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: cleanText}, FinishReason: nil}},
+			})
+		}
+		if len(toolCalls) > 0 {
+			finishReason = "tool_calls"
+			for i, tc := range toolCalls {
+				callID := "call_" + randomID(24)
+				writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
+					ID:      id,
+					Object:  "chat.completion.chunk",
+					Created: created,
+					Model:   body.Model,
+					Choices: []compat.OpenAIStreamChoice{{
+						Index:        0,
+						Delta:        compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: i, ID: callID, Type: "function", Function: compat.OpenAIStreamFunctionPayload{Name: tc.Name, Arguments: ""}}}},
+						FinishReason: nil,
+					}},
+				})
+				argsJSON, _ := json.Marshal(tc.Arguments)
+				for _, chunk := range chunkString(string(argsJSON), 128) {
+					writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
+						ID:      id,
+						Object:  "chat.completion.chunk",
+						Created: created,
+						Model:   body.Model,
+						Choices: []compat.OpenAIStreamChoice{{
+							Index:        0,
+							Delta:        compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: i, Function: compat.OpenAIStreamFunctionPayload{Arguments: chunk}}}},
+							FinishReason: nil,
+						}},
+					})
+				}
+			}
+		} else if cleanText == "" {
+			writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
+				ID:      id,
+				Object:  "chat.completion.chunk",
+				Created: created,
+				Model:   body.Model,
+				Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: sanitizeResponse(result.Text)}, FinishReason: nil}},
+			})
+		}
+	} else {
+		writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
+			ID:      id,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   body.Model,
+			Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: sanitizeResponse(result.Text)}, FinishReason: nil}},
+		})
+	}
+
+	writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   body.Model,
+		Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{}, FinishReason: finishReason}},
+	})
+	_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (h *Handler) handleMockIdentityStream(c *gin.Context, body *compat.AnthropicRequest, mockText string) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	messageID := "msg_" + randomID(24)
+	model := body.Model
+	if model == "" {
+		model = "claude-3-5-sonnet-20241022"
+	}
+	writeAnthropicSSE(c, "message_start", gin.H{
+		"type": "message_start",
+		"message": gin.H{
+			"id":            messageID,
+			"type":          "message",
+			"role":          "assistant",
+			"content":       []interface{}{},
+			"model":         model,
+			"stop_reason":   nil,
+			"stop_sequence": nil,
+			"usage":         gin.H{"input_tokens": 15, "output_tokens": 0},
+		},
+	})
+	writeAnthropicTextBlock(c, 0, mockText)
+	writeAnthropicSSE(c, "message_delta", gin.H{"type": "message_delta", "delta": gin.H{"stop_reason": "end_turn", "stop_sequence": nil}, "usage": gin.H{"output_tokens": 35}})
+	writeAnthropicSSE(c, "message_stop", gin.H{"type": "message_stop"})
+}
+
+func (h *Handler) handleMockIdentityNonStream(c *gin.Context, body *compat.AnthropicRequest, mockText string) {
+	model := body.Model
+	if model == "" {
+		model = "claude-3-5-sonnet-20241022"
+	}
+	c.JSON(http.StatusOK, compat.AnthropicResponse{
+		ID:           "msg_" + randomID(24),
+		Type:         "message",
+		Role:         "assistant",
+		Content:      []compat.AnthropicContentBlock{{Type: "text", Text: mockText}},
+		Model:        model,
+		StopReason:   "end_turn",
+		StopSequence: nil,
+		Usage:        compat.AnthropicUsage{InputTokens: 15, OutputTokens: 35},
+	})
+}
+
+func (h *Handler) handleOpenAIMockStream(c *gin.Context, body *compat.OpenAIChatRequest, mockText string) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	id := "chatcmpl-" + randomID(24)
+	created := time.Now().Unix()
+	writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   body.Model,
+		Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Role: "assistant", Content: mockText}, FinishReason: nil}},
+	})
+	writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   body.Model,
+		Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{}, FinishReason: "stop"}},
+	})
+	_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (h *Handler) handleOpenAIMockNonStream(c *gin.Context, body *compat.OpenAIChatRequest, mockText string) {
+	c.JSON(http.StatusOK, compat.OpenAIChatCompletion{
+		ID:      "chatcmpl-" + randomID(24),
+		Object:  "chat.completion",
+		Created: time.Now().Unix(),
+		Model:   body.Model,
+		Choices: []compat.OpenAIChatChoice{{Index: 0, Message: compat.OpenAIAssistantText{Role: "assistant", Content: mockText}, FinishReason: "stop"}},
+		Usage:   compat.OpenAIUsage{PromptTokens: 15, CompletionTokens: 35, TotalTokens: 50},
+	})
 }
 
 // ServeDocs 服务API文档页面
@@ -261,9 +563,118 @@ func (h *Handler) ServeDocs(c *gin.Context) {
 
 // Health 健康检查
 func (h *Handler) Health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"timestamp": time.Now().Unix(),
-		"version":   "go-1.0.0",
-	})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "timestamp": time.Now().Unix(), "version": "go-compat-2.0.0"})
 }
+
+type collectedCursorOutput struct {
+	Text  string
+	Usage models.Usage
+}
+
+func collectCursorOutput(ctx context.Context, chatGenerator <-chan interface{}) (collectedCursorOutput, error) {
+	var buffer bytes.Buffer
+	var usage models.Usage
+	for {
+		select {
+		case <-ctx.Done():
+			return collectedCursorOutput{}, fmt.Errorf("request cancelled")
+		case item, ok := <-chatGenerator:
+			if !ok {
+				return collectedCursorOutput{Text: buffer.String(), Usage: usage}, nil
+			}
+			switch v := item.(type) {
+			case string:
+				buffer.WriteString(v)
+			case models.Usage:
+				usage = v
+			case error:
+				return collectedCursorOutput{}, v
+			}
+		}
+	}
+}
+
+func estimateOutputTokens(result collectedCursorOutput) int {
+	if result.Usage.CompletionTokens > 0 {
+		return result.Usage.CompletionTokens
+	}
+	if result.Text == "" {
+		return 0
+	}
+	return (len(result.Text) + 3) / 4
+}
+
+func randomID(length int) string {
+	return utils.GenerateRandomString(length)
+}
+
+func chunkString(value string, size int) []string {
+	if value == "" || size <= 0 {
+		return []string{value}
+	}
+	chunks := make([]string, 0, (len(value)+size-1)/size)
+	for i := 0; i < len(value); i += size {
+		end := i + size
+		if end > len(value) {
+			end = len(value)
+		}
+		chunks = append(chunks, value[i:end])
+	}
+	return chunks
+}
+
+func writeAnthropicTextBlock(c *gin.Context, index int, text string) {
+	writeAnthropicSSE(c, "content_block_start", gin.H{"type": "content_block_start", "index": index, "content_block": gin.H{"type": "text", "text": ""}})
+	writeAnthropicSSE(c, "content_block_delta", gin.H{"type": "content_block_delta", "index": index, "delta": gin.H{"type": "text_delta", "text": text}})
+	writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": index})
+}
+
+func writeAnthropicSSE(c *gin.Context, event string, payload interface{}) {
+	blob, _ := json.Marshal(payload)
+	_, _ = c.Writer.Write([]byte("event: " + event + "\n"))
+	_, _ = c.Writer.Write([]byte("data: " + string(blob) + "\n\n"))
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func writeOpenAISSE(c *gin.Context, payload compat.OpenAIChatCompletionChunk) {
+	blob, _ := json.Marshal(payload)
+	_, _ = c.Writer.Write([]byte("data: " + string(blob) + "\n\n"))
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func nullableString(value string) interface{} {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+const defaultDocsHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cursor2API - Go Version</title>
+    <style>
+        body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; }
+        code, pre { background: #f6f8fa; padding: 2px 6px; border-radius: 6px; }
+        pre { padding: 12px; overflow: auto; }
+    </style>
+</head>
+<body>
+    <h1>Cursor2API · Go compatibility build</h1>
+    <p>Available endpoints:</p>
+    <ul>
+        <li><code>GET /v1/models</code></li>
+        <li><code>POST /v1/chat/completions</code></li>
+        <li><code>POST /v1/messages</code></li>
+        <li><code>POST /v1/messages/count_tokens</code></li>
+        <li><code>POST /v1/responses</code></li>
+        <li><code>GET /health</code></li>
+    </ul>
+</body>
+</html>`

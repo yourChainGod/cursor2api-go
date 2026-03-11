@@ -13,7 +13,7 @@ echo.
 :: 检查Go是否安装
 go version >nul 2>&1
 if errorlevel 1 (
-    echo ❌ Go 未安装，请先安装 Go 1.21 或更高版本
+    echo ❌ Go 未安装，请先安装 Go 1.24 或更高版本
     echo 💡 安装方法: https://golang.org/dl/
     pause
     exit /b 1
@@ -23,18 +23,18 @@ if errorlevel 1 (
 for /f "tokens=3" %%i in ('go version') do set GO_VERSION=%%i
 set GO_VERSION=!GO_VERSION:go=!
 
-:: 检查Go版本是否满足要求 (需要 >= 1.21)
+:: 检查Go版本是否满足要求 (需要 >= 1.24)
 for /f "tokens=1,2 delims=." %%a in ("!GO_VERSION!") do (
     set MAJOR=%%a
     set MINOR=%%b
 )
 if !MAJOR! LSS 1 (
-    echo ❌ Go 版本 !GO_VERSION! 过低，请安装 Go 1.21 或更高版本
+    echo ❌ Go 版本 !GO_VERSION! 过低，请安装 Go 1.24 或更高版本
     pause
     exit /b 1
 )
 if !MAJOR! EQU 1 if !MINOR! LSS 21 (
-    echo ❌ Go 版本 !GO_VERSION! 过低，请安装 Go 1.21 或更高版本
+    echo ❌ Go 版本 !GO_VERSION! 过低，请安装 Go 1.24 或更高版本
     pause
     exit /b 1
 )
@@ -74,15 +74,25 @@ if not exist .env (
         echo.
         echo # API配置
         echo API_KEY=0000
-        echo MODELS=gpt-5.1,gpt-5,gpt-5-codex,gpt-5-mini,gpt-5-nano,gpt-4.1,gpt-4o,claude-3.5-sonnet,claude-3.5-haiku,claude-3.7-sonnet,claude-4-sonnet,claude-4.5-sonnet,claude-4-opus,claude-4.1-opus,gemini-2.5-pro,gemini-2.5-flash,gemini-3.0-pro,o3,o4-mini,deepseek-r1,deepseek-v3.1,kimi-k2-instruct,grok-3
+        echo MODELS=claude-sonnet-4.6,claude-sonnet-4-5-20250929,claude-sonnet-4-20250514,claude-3-5-sonnet-20241022
         echo SYSTEM_PROMPT_INJECT=
         echo.
         echo # 请求配置
-        echo TIMEOUT=30
+        echo TIMEOUT=60
+        echo MAX_INPUT_LENGTH=200000
         echo USER_AGENT=Mozilla/5.0 ^(Windows NT 10.0; Win64; x64^) AppleWebKit/537.36 ^(KHTML, like Gecko^) Chrome/140.0.0.0 Safari/537.36
+        echo UNMASKED_VENDOR_WEBGL=Google Inc. ^(Intel^)
+        echo UNMASKED_RENDERER_WEBGL=ANGLE ^(Intel, Intel^(R^) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11^)
         echo.
         echo # Cursor配置
-        echo SCRIPT_URL=https://cursor.com/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js?i=0^^^&v=3^^^&h=cursor.com
+        echo SCRIPT_URL=https://cursor.com/_next/static/chunks/pages/_app.js
+        echo.
+        echo # Vision / OCR配置
+        echo VISION_ENABLED=false
+        echo VISION_MODE=ocr
+        echo VISION_BASE_URL=https://api.openai.com/v1/chat/completions
+        echo VISION_API_KEY=
+        echo VISION_MODEL=gpt-4o-mini
     ) > .env
     echo ✅ 默认 .env 文件已创建
 ) else (
@@ -97,6 +107,21 @@ if errorlevel 1 (
     echo ❌ 依赖下载失败！
     pause
     exit /b 1
+)
+
+:: 安装 Node 运行时依赖（用于 OCR / JS helper）
+if exist package.json (
+    if not exist node_modules\tesseract.js\package.json (
+        echo 📦 正在安装 Node 运行时依赖...
+        npm install --omit=dev
+        if errorlevel 1 (
+            echo ❌ Node 依赖安装失败！
+            pause
+            exit /b 1
+        )
+    ) else (
+        echo ✅ Node 运行时依赖已就绪
+    )
 )
 
 :: 构建应用

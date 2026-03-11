@@ -1,0 +1,18 @@
+# Example YAML config for cursor2api-go
+# The Go service supports both environment variables and YAML.
+
+port: 8002
+timeout: 60
+cursor_model: claude-sonnet-4.6
+
+fingerprint:
+  user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+
+vision:
+  # If the vision section exists, vision preprocessing is enabled by default.
+  enabled: true
+  mode: ocr
+  # For api mode, switch `mode: api` and fill the fields below.
+  base_url: https://api.openai.com/v1/chat/completions
+  api_key: ""
+  model: gpt-4o-mini

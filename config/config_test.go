@@ -35,7 +35,12 @@ SYSTEM_PROMPT_INJECT=Test prompt
 TIMEOUT=60
 MAX_INPUT_LENGTH=10000
 USER_AGENT=Test Agent
-SCRIPT_URL=https://test.com/script.js`
+SCRIPT_URL=https://test.com/script.js
+VISION_ENABLED=true
+VISION_MODE=api
+VISION_BASE_URL=https://vision.example/v1/chat/completions
+VISION_API_KEY=vision-key
+VISION_MODEL=gpt-4o-mini`
 
 	// Write to temporary .env file
 	err := os.WriteFile(".env", []byte(envContent), 0644)
@@ -73,6 +78,69 @@ SCRIPT_URL=https://test.com/script.js`
 	}
 	if config.ScriptURL != "https://test.com/script.js" {
 		t.Errorf("ScriptURL = %v, want https://test.com/script.js", config.ScriptURL)
+	}
+	if !config.Vision.Enabled {
+		t.Errorf("Vision.Enabled = %v, want true", config.Vision.Enabled)
+	}
+	if config.Vision.Mode != "api" {
+		t.Errorf("Vision.Mode = %v, want api", config.Vision.Mode)
+	}
+	if config.Vision.BaseURL != "https://vision.example/v1/chat/completions" {
+		t.Errorf("Vision.BaseURL = %v, want https://vision.example/v1/chat/completions", config.Vision.BaseURL)
+	}
+	if config.Vision.APIKey != "vision-key" {
+		t.Errorf("Vision.APIKey = %v, want vision-key", config.Vision.APIKey)
+	}
+	if config.Vision.Model != "gpt-4o-mini" {
+		t.Errorf("Vision.Model = %v, want gpt-4o-mini", config.Vision.Model)
+	}
+}
+
+func TestLoadConfigFromYAML(t *testing.T) {
+	yamlContent := `port: 7777
+timeout: 90
+cursor_model: claude-sonnet-4.6
+fingerprint:
+  user_agent: YAML Agent
+vision:
+  mode: ocr
+  model: gpt-4o-mini
+`
+	if err := os.WriteFile("config.yaml", []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("Failed to create config.yaml: %v", err)
+	}
+	defer os.Remove("config.yaml")
+
+	os.Unsetenv("PORT")
+	os.Unsetenv("TIMEOUT")
+	os.Unsetenv("CURSOR_MODEL")
+	os.Unsetenv("USER_AGENT")
+	os.Unsetenv("VISION_ENABLED")
+	os.Unsetenv("VISION_MODE")
+	os.Unsetenv("VISION_BASE_URL")
+	os.Unsetenv("VISION_API_KEY")
+	os.Unsetenv("VISION_MODEL")
+	os.Setenv("API_KEY", "test-key")
+	defer os.Unsetenv("API_KEY")
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() from YAML error = %v", err)
+	}
+	if config.Port != 7777 {
+		t.Errorf("Port = %v, want 7777", config.Port)
+	}
+	if config.Timeout != 90 {
+		t.Errorf("Timeout = %v, want 90", config.Timeout)
+	}
+	if config.FP.UserAgent != "YAML Agent" {
+		t.Errorf("UserAgent = %v, want YAML Agent", config.FP.UserAgent)
+	}
+	if !config.Vision.Enabled {
+		t.Errorf("Vision.Enabled = %v, want true when vision section exists", config.Vision.Enabled)
+	}
+	if config.Vision.Mode != "ocr" {
+		t.Errorf("Vision.Mode = %v, want ocr", config.Vision.Mode)
 	}
 }
 
@@ -130,60 +198,60 @@ func TestValidate(t *testing.T) {
 		{
 			name: "valid config",
 			config: &Config{
-				Port:            8000,
-				APIKey:          "test-key",
-				Timeout:         30,
-				MaxInputLength:  1000,
+				Port:           8000,
+				APIKey:         "test-key",
+				Timeout:        30,
+				MaxInputLength: 1000,
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid port - too low",
 			config: &Config{
-				Port:            0,
-				APIKey:          "test-key",
-				Timeout:         30,
-				MaxInputLength:  1000,
+				Port:           0,
+				APIKey:         "test-key",
+				Timeout:        30,
+				MaxInputLength: 1000,
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid port - too high",
 			config: &Config{
-				Port:            70000,
-				APIKey:          "test-key",
-				Timeout:         30,
-				MaxInputLength:  1000,
+				Port:           70000,
+				APIKey:         "test-key",
+				Timeout:        30,
+				MaxInputLength: 1000,
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing API key",
 			config: &Config{
-				Port:            8000,
-				APIKey:          "",
-				Timeout:         30,
-				MaxInputLength:  1000,
+				Port:           8000,
+				APIKey:         "",
+				Timeout:        30,
+				MaxInputLength: 1000,
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid timeout",
 			config: &Config{
-				Port:            8000,
-				APIKey:          "test-key",
-				Timeout:         0,
-				MaxInputLength:  1000,
+				Port:           8000,
+				APIKey:         "test-key",
+				Timeout:        0,
+				MaxInputLength: 1000,
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid max input length",
 			config: &Config{
-				Port:            8000,
-				APIKey:          "test-key",
-				Timeout:         30,
-				MaxInputLength:  0,
+				Port:           8000,
+				APIKey:         "test-key",
+				Timeout:        30,
+				MaxInputLength: 0,
 			},
 			wantErr: true,
 		},

@@ -105,8 +105,19 @@ func setupRoutes(router *gin.Engine, handler *handlers.Handler) {
 		// 模型列表
 		v1.GET("/models", middleware.AuthRequired(), handler.ListModels)
 
-		// 聊天完成
+		// OpenAI Chat Completions
 		v1.POST("/chat/completions", middleware.AuthRequired(), handler.ChatCompletions)
+		router.POST("/chat/completions", middleware.AuthRequired(), handler.ChatCompletions)
+
+		// Anthropic Messages API
+		v1.POST("/messages", middleware.AuthRequired(), handler.Messages)
+		router.POST("/messages", middleware.AuthRequired(), handler.Messages)
+		v1.POST("/messages/count_tokens", middleware.AuthRequired(), handler.CountTokens)
+		router.POST("/messages/count_tokens", middleware.AuthRequired(), handler.CountTokens)
+
+		// OpenAI Responses API (Cursor IDE agent mode)
+		v1.POST("/responses", middleware.AuthRequired(), handler.Responses)
+		router.POST("/responses", middleware.AuthRequired(), handler.Responses)
 	}
 
 	// 静态文件服务（如果需要）

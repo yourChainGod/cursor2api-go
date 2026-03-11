@@ -18,12 +18,16 @@
 
 ## ✨ 功能特性
 
-- ✅ 兼容基础 OpenAI chat completions 格式
+- ✅ 兼容 OpenAI Chat Completions
+- ✅ 兼容 Anthropic Messages API（`/v1/messages`）
+- ✅ 兼容 OpenAI Responses API（`/v1/responses`，适配 Cursor IDE Agent 模式）
 - ✅ 支持流式和非流式响应
-- ✅ 高性能 Go 语言实现
+- ✅ 支持 tools / function calling 与工具调用解析
+- ✅ 内置拒绝拦截、响应清洗、tool_choice=any 兜底重试
+- ✅ 支持身份探针拦截与模拟 Claude 响应
+- ✅ 支持截断检测与工具响应自动续写
 - ✅ 自动处理 Cursor Web 认证
 - ✅ 简洁的 Web 界面
-- ❌ 不支持 tools / function calling / MCP
 
 ## 🤖 支持的模型
 
@@ -64,8 +68,12 @@ start-go.bat
 git clone https://github.com/libaxuan/cursor2api-go.git
 cd cursor2api-go
 
+# 可选：先复制环境变量模板
+cp .env.example .env
+
 # 下载依赖
 go mod tidy
+npm install --omit=dev
 
 # 编译
 go build -o cursor2api-go
@@ -126,7 +134,8 @@ docker-compose logs -f
 2. **自定义配置**:
 修改 `docker-compose.yml` 文件中的环境变量以满足您的需求：
 - 修改 `API_KEY` 为安全的密钥
-- 根据需要调整 `MODELS`、`TIMEOUT` 等配置
+- 根据需要调整 `MODELS`、`TIMEOUT`、`MAX_INPUT_LENGTH`
+- 如需图片预处理，配置 `VISION_ENABLED` / `VISION_MODE` / `VISION_*`
 - 更改暴露的端口
 
 ### 系统服务部署（Linux）
@@ -180,6 +189,32 @@ sudo systemctl status cursor2api-go
 curl -H "Authorization: Bearer 0000" http://localhost:8002/v1/models
 ```
 
+### Anthropic Messages API
+
+```bash
+curl -X POST http://localhost:8002/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: 0000" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "hello"}]
+  }'
+```
+
+### OpenAI Responses API
+
+```bash
+curl -X POST http://localhost:8002/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 0000" \
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "input": "list files in the project",
+    "stream": false
+  }'
+```
+
 ### 非流式聊天
 
 ```bash
@@ -218,13 +253,41 @@ curl -X POST http://localhost:8002/v1/chat/completions \
 
 ### 环境变量
 
+推荐先复制模板：
+
+```bash
+cp .env.example .env
+```
+
+如果你偏好 YAML，也可以参考：`config.example.yaml`
+
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
 | `PORT` | `8002` | 服务器端口 |
 | `DEBUG` | `false` | 调试模式（启用后显示详细日志和路由信息） |
 | `API_KEY` | `0000` | API 认证密钥 |
-| `MODELS` | `claude-sonnet-4.6` | 支持的模型列表（逗号分隔） |
+| `MODELS` | `claude-sonnet-4.6,claude-sonnet-4-5-20250929,...` | 支持的模型列表（逗号分隔） |
 | `TIMEOUT` | `60` | 请求超时时间（秒） |
+| `VISION_ENABLED` | `false` | 是否启用图片预处理 / OCR |
+| `VISION_MODE` | `ocr` | `ocr`（本地 OCR）或 `api`（外部视觉模型） |
+| `VISION_BASE_URL` | `https://api.openai.com/v1/chat/completions` | 外部视觉 API 地址 |
+| `VISION_API_KEY` | `` | 外部视觉 API Key（`VISION_MODE=api` 时必填） |
+| `VISION_MODEL` | `gpt-4o-mini` | 外部视觉模型名 |
+
+### 图片 / OCR
+
+Go 版现已支持将图片输入在发送到 Cursor Web 前先做预处理：
+
+- `VISION_MODE=ocr`：通过本地 Node + `tesseract.js` 做 OCR（默认推荐）
+- `VISION_MODE=api`：转发到外部视觉模型接口
+
+示例：
+
+```bash
+VISION_ENABLED=true \
+VISION_MODE=ocr \
+./cursor2api-go
+```
 
 ### 调试模式
 
@@ -272,6 +335,45 @@ DEBUG=true ./cursor2api-go
 # 运行现有测试
 go test ./...
 ```
+
+### 运行 live smoke
+
+```bash
+./scripts/e2e_smoke.sh
+
+# 或
+make smoke
+```
+
+该脚本会：
+- 启动真实服务进程
+- 验证 `/health`
+- 验证 `/v1/models`
+- 验证 `/v1/messages/count_tokens`
+- 验证 `/v1/messages` / `/v1/chat/completions` / `/v1/responses` 的 identity-probe 流式与非流式短路
+
+### 运行真实 upstream matrix
+
+```bash
+./scripts/e2e_upstream_matrix.sh
+
+# 快速模式
+MODE=quick ./scripts/e2e_upstream_matrix.sh
+
+# 或
+make upstream-check
+```
+
+该脚本会直接命中真实 Cursor Web 上游，并把结果区分为：
+- `PASS`：本地代理 + 上游行为都符合预期
+- `WARN`：请求成功，但上游行为未完全按预期配合
+- `FAIL`：本地服务、HTTP、或协议成形失败
+
+### 能力矩阵
+
+详见：
+- `docs/API_CAPABILITIES.md`
+- `docs/UPSTREAM_VALIDATION.md`
 
 ### 构建项目
 

@@ -29,6 +29,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
 // Config 应用程序配置结构
@@ -47,6 +48,7 @@ type Config struct {
 	// Cursor相关配置
 	ScriptURL string `json:"script_url"`
 	FP        FP     `json:"fp"`
+	Vision    Vision `json:"vision"`
 }
 
 // FP 指纹配置结构
@@ -54,6 +56,25 @@ type FP struct {
 	UserAgent               string `json:"userAgent"`
 	UNMASKED_VENDOR_WEBGL   string `json:"unmaskedVendorWebgl"`
 	UNMASKED_RENDERER_WEBGL string `json:"unmaskedRendererWebgl"`
+}
+
+// Vision 视觉/OCR配置
+type Vision struct {
+	Enabled bool   `json:"enabled" yaml:"enabled"`
+	Mode    string `json:"mode" yaml:"mode"`
+	BaseURL string `json:"base_url" yaml:"base_url"`
+	APIKey  string `json:"api_key" yaml:"api_key"`
+	Model   string `json:"model" yaml:"model"`
+}
+
+type yamlConfig struct {
+	Port        int    `yaml:"port"`
+	Timeout     int    `yaml:"timeout"`
+	CursorModel string `yaml:"cursor_model"`
+	Fingerprint struct {
+		UserAgent string `yaml:"user_agent"`
+	} `yaml:"fingerprint"`
+	Vision Vision `yaml:"vision"`
 }
 
 // LoadConfig 加载配置
@@ -65,20 +86,30 @@ func LoadConfig() (*Config, error) {
 
 	config := &Config{
 		// 设置默认值
-		Port:               getEnvAsInt("PORT", 8002),
-		Debug:              getEnvAsBool("DEBUG", false),
-		APIKey:             getEnv("API_KEY", "0000"),
-		Models:             getEnv("MODELS", "gpt-4o,claude-3.5-sonnet"),
-		SystemPromptInject: getEnv("SYSTEM_PROMPT_INJECT", ""),
-		Timeout:            getEnvAsInt("TIMEOUT", 60),
-		MaxInputLength:     getEnvAsInt("MAX_INPUT_LENGTH", 200000),
-		ScriptURL:          getEnv("SCRIPT_URL", "https://cursor.com/_next/static/chunks/pages/_app.js"),
+		Port:               8002,
+		Debug:              false,
+		APIKey:             "0000",
+		Models:             "claude-sonnet-4.6,claude-sonnet-4-5-20250929,claude-sonnet-4-20250514,claude-3-5-sonnet-20241022",
+		SystemPromptInject: "",
+		Timeout:            60,
+		MaxInputLength:     200000,
+		ScriptURL:          "https://cursor.com/_next/static/chunks/pages/_app.js",
 		FP: FP{
-			UserAgent:               getEnv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"),
-			UNMASKED_VENDOR_WEBGL:   getEnv("UNMASKED_VENDOR_WEBGL", "Google Inc. (Intel)"),
-			UNMASKED_RENDERER_WEBGL: getEnv("UNMASKED_RENDERER_WEBGL", "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+			UserAgent:               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+			UNMASKED_VENDOR_WEBGL:   "Google Inc. (Intel)",
+			UNMASKED_RENDERER_WEBGL: "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+		},
+		Vision: Vision{
+			Enabled: false,
+			Mode:    "ocr",
+			BaseURL: "https://api.openai.com/v1/chat/completions",
+			APIKey:  "",
+			Model:   "gpt-4o-mini",
 		},
 	}
+
+	applyYAMLConfig(config)
+	applyEnvOverrides(config)
 
 	// 验证必要的配置
 	if err := config.validate(); err != nil {
@@ -106,7 +137,100 @@ func (c *Config) validate() error {
 		return fmt.Errorf("max input length must be positive")
 	}
 
+	if c.Vision.Enabled {
+		if c.Vision.Mode == "" {
+			c.Vision.Mode = "ocr"
+		}
+		if c.Vision.Mode != "ocr" && c.Vision.Mode != "api" {
+			return fmt.Errorf("vision mode must be ocr or api")
+		}
+		if c.Vision.Mode == "api" && strings.TrimSpace(c.Vision.APIKey) == "" {
+			return fmt.Errorf("VISION_API_KEY is required when VISION_MODE=api")
+		}
+	}
+
 	return nil
+}
+
+func applyYAMLConfig(config *Config) {
+	for _, path := range []string{"config.yaml", "config.yml"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		var yc yamlConfig
+		if err := yaml.Unmarshal(data, &yc); err != nil {
+			logrus.Warnf("Failed to parse %s: %v", path, err)
+			return
+		}
+		if yc.Port > 0 {
+			config.Port = yc.Port
+		}
+		if yc.Timeout > 0 {
+			config.Timeout = yc.Timeout
+		}
+		if strings.TrimSpace(yc.CursorModel) != "" {
+			config.Models = yc.CursorModel
+		}
+		if strings.TrimSpace(yc.Fingerprint.UserAgent) != "" {
+			config.FP.UserAgent = yc.Fingerprint.UserAgent
+		}
+		if yc.Vision.Mode != "" || yc.Vision.BaseURL != "" || yc.Vision.APIKey != "" || yc.Vision.Model != "" || yc.Vision.Enabled || visionKeyExists(data) {
+			config.Vision = mergeVision(config.Vision, yc.Vision)
+			if visionKeyExists(data) {
+				config.Vision.Enabled = true
+			}
+			if strings.Contains(string(data), "enabled: false") {
+				config.Vision.Enabled = false
+			}
+		}
+		return
+	}
+}
+
+func applyEnvOverrides(config *Config) {
+	config.Port = getEnvAsInt("PORT", config.Port)
+	config.Debug = getEnvAsBool("DEBUG", config.Debug)
+	config.APIKey = getEnv("API_KEY", config.APIKey)
+	config.Models = getEnv("MODELS", config.Models)
+	config.SystemPromptInject = getEnv("SYSTEM_PROMPT_INJECT", config.SystemPromptInject)
+	config.Timeout = getEnvAsInt("TIMEOUT", config.Timeout)
+	config.MaxInputLength = getEnvAsInt("MAX_INPUT_LENGTH", config.MaxInputLength)
+	config.ScriptURL = getEnv("SCRIPT_URL", config.ScriptURL)
+	config.FP.UserAgent = getEnv("USER_AGENT", config.FP.UserAgent)
+	config.FP.UNMASKED_VENDOR_WEBGL = getEnv("UNMASKED_VENDOR_WEBGL", config.FP.UNMASKED_VENDOR_WEBGL)
+	config.FP.UNMASKED_RENDERER_WEBGL = getEnv("UNMASKED_RENDERER_WEBGL", config.FP.UNMASKED_RENDERER_WEBGL)
+
+	config.Vision.Enabled = getEnvAsBool("VISION_ENABLED", config.Vision.Enabled)
+	config.Vision.Mode = getEnv("VISION_MODE", config.Vision.Mode)
+	config.Vision.BaseURL = getEnv("VISION_BASE_URL", config.Vision.BaseURL)
+	config.Vision.APIKey = getEnv("VISION_API_KEY", config.Vision.APIKey)
+	config.Vision.Model = getEnv("VISION_MODEL", config.Vision.Model)
+}
+
+func mergeVision(base Vision, overlay Vision) Vision {
+	merged := base
+	if overlay.Mode != "" {
+		merged.Mode = overlay.Mode
+	}
+	if overlay.BaseURL != "" {
+		merged.BaseURL = overlay.BaseURL
+	}
+	if overlay.APIKey != "" {
+		merged.APIKey = overlay.APIKey
+	}
+	if overlay.Model != "" {
+		merged.Model = overlay.Model
+	}
+	if overlay.Enabled {
+		merged.Enabled = true
+	}
+	return merged
+}
+
+func visionKeyExists(data []byte) bool {
+	return strings.Contains(string(data), "vision:")
 }
 
 // GetModels 获取模型列表

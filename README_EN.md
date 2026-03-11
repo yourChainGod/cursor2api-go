@@ -9,12 +9,16 @@ A Go service that converts Cursor Web to a basic OpenAI chat completions compati
 
 ## ✨ Features
 
-- ✅ Compatible with the basic OpenAI chat completions format
-- ✅ Supports streaming and non-streaming responses
-- ✅ High-performance Go implementation
+- ✅ OpenAI Chat Completions compatibility
+- ✅ Anthropic Messages API compatibility (`/v1/messages`)
+- ✅ OpenAI Responses API compatibility (`/v1/responses`)
+- ✅ Streaming and non-streaming responses
+- ✅ Tools / function calling support with compatibility parsing
+- ✅ Refusal interception, response sanitization, identity-probe mock responses
+- ✅ Truncation detection + auto-continue for tool outputs
+- ✅ Vision / OCR preprocessing (`ocr` or external `api` mode)
 - ✅ Automatic Cursor Web authentication
 - ✅ Clean web interface
-- ❌ Does not support tools / function calling / MCP
 
 ## 🤖 Supported Models
 
@@ -55,8 +59,12 @@ start-go.bat
 git clone https://github.com/libaxuan/cursor2api-go.git
 cd cursor2api-go
 
+# Optional: copy the env template first
+cp .env.example .env
+
 # Download dependencies
 go mod tidy
+npm install --omit=dev
 
 # Build
 go build -o cursor2api-go
@@ -117,7 +125,8 @@ docker-compose logs -f
 2. **Custom Configuration**:
 Modify the environment variables in the `docker-compose.yml` file to meet your needs:
 - Change `API_KEY` to a secure key
-- Adjust `MODELS`, `TIMEOUT`, and other configurations as needed
+- Adjust `MODELS`, `TIMEOUT`, and `MAX_INPUT_LENGTH` as needed
+- If you want image preprocessing, configure `VISION_ENABLED` / `VISION_MODE` / `VISION_*`
 - Change the exposed port
 
 ### System Service Deployment (Linux)
@@ -209,13 +218,26 @@ In any app that supports custom OpenAI API (e.g., ChatGPT Next Web, Lobe Chat):
 
 ### Environment Variables
 
+Recommended first step:
+
+```bash
+cp .env.example .env
+```
+
+If you prefer YAML, see `config.example.yaml`.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8002` | Server port |
 | `DEBUG` | `false` | Debug mode (shows detailed logs and route info when enabled) |
 | `API_KEY` | `0000` | API authentication key |
-| `MODELS` | `claude-sonnet-4.6` | Supported models (comma-separated) |
+| `MODELS` | `claude-sonnet-4.6,claude-sonnet-4-5-20250929,...` | Supported models (comma-separated) |
 | `TIMEOUT` | `60` | Request timeout (seconds) |
+| `VISION_ENABLED` | `false` | Enable image preprocessing / OCR |
+| `VISION_MODE` | `ocr` | `ocr` (local OCR) or `api` (external vision model) |
+| `VISION_BASE_URL` | `https://api.openai.com/v1/chat/completions` | External vision API base URL |
+| `VISION_API_KEY` | `` | Required when `VISION_MODE=api` |
+| `VISION_MODEL` | `gpt-4o-mini` | External vision model name |
 
 ### Debug Mode
 
@@ -263,6 +285,46 @@ Both scripts have identical functionality, only display styles differ. Use `star
 # Run existing tests
 go test ./...
 ```
+
+### Running the live smoke script
+
+```bash
+./scripts/e2e_smoke.sh
+
+# or
+make smoke
+```
+
+This script starts the real server locally and verifies:
+
+- `/health`
+- `/v1/models`
+- `/v1/messages/count_tokens`
+- identity-probe short-circuit paths for `/v1/messages`, `/v1/chat/completions`, and `/v1/responses`
+
+### Running the real upstream matrix
+
+```bash
+./scripts/e2e_upstream_matrix.sh
+
+# quick mode
+MODE=quick ./scripts/e2e_upstream_matrix.sh
+
+# or
+make upstream-check
+```
+
+This script talks to the real Cursor Web upstream and classifies each check as:
+
+- `PASS` — local proxy + upstream behavior matched expectations
+- `WARN` — request succeeded, but upstream behavior was weaker/different than expected
+- `FAIL` — local service, HTTP transport, or protocol framing failed
+
+### Capability Matrix
+
+See:
+- `docs/API_CAPABILITIES.md`
+- `docs/UPSTREAM_VALIDATION.md`
 
 ### Building
 

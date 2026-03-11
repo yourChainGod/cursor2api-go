@@ -33,9 +33,12 @@ WORKDIR /root/
 # 从构建阶段复制二进制文件
 COPY --from=builder /app/cursor2api-go .
 
-# 复制静态文件和 JS 代码（需要用于 JavaScript 执行）
+# 复制静态文件、JS 代码和 Node 运行时依赖清单（用于 JavaScript 执行 / OCR）
 COPY --from=builder /app/static ./static
 COPY --from=builder /app/jscode ./jscode
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/package-lock.json ./package-lock.json
+RUN npm install --omit=dev
 
 # 更改所有者
 RUN chown -R appuser:appuser /root/

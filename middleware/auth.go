@@ -33,21 +33,27 @@ import (
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
-		
-		if authHeader == "" {
+		token := ""
+
+		switch {
+		case strings.HasPrefix(authHeader, "Bearer "):
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		case c.GetHeader("x-api-key") != "":
+			token = c.GetHeader("x-api-key")
+		case c.GetHeader("anthropic-api-key") != "":
+			token = c.GetHeader("anthropic-api-key")
+		case authHeader == "":
 			errorResponse := models.NewErrorResponse(
-				"Missing authorization header",
+				"Missing authorization header or API key",
 				"authentication_error",
 				"missing_auth",
 			)
 			c.JSON(http.StatusUnauthorized, errorResponse)
 			c.Abort()
 			return
-		}
-
-		if !strings.HasPrefix(authHeader, "Bearer ") {
+		default:
 			errorResponse := models.NewErrorResponse(
-				"Invalid authorization format. Expected 'Bearer <token>'",
+				"Invalid authorization format. Expected 'Bearer <token>' or x-api-key/anthropic-api-key",
 				"authentication_error",
 				"invalid_auth_format",
 			)
@@ -55,8 +61,6 @@ func AuthRequired() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-
-		token := strings.TrimPrefix(authHeader, "Bearer ")
 		expectedToken := os.Getenv("API_KEY")
 		if expectedToken == "" {
 			expectedToken = "0000" // 默认值

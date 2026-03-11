@@ -90,7 +90,7 @@ func handleError(c *gin.Context, err error) {
 		if e.Type == gin.ErrorTypePublic {
 			statusCode = http.StatusInternalServerError
 		}
-		
+
 		errorResponse := models.NewErrorResponse(
 			e.Error(),
 			"validation_error",
@@ -113,11 +113,11 @@ func handleError(c *gin.Context, err error) {
 func RecoveryHandler() gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
 		logrus.WithField("panic", recovered).Error("Panic occurred")
-		
+
 		if c.Writer.Written() {
 			return
 		}
-		
+
 		errorResponse := models.NewErrorResponse(
 			"Internal server error",
 			"panic_error",
@@ -170,8 +170,8 @@ func NewAuthenticationError(message string) *AuthenticationError {
 
 // RateLimitError 限流错误
 type RateLimitError struct {
-	Message     string `json:"message"`
-	RetryAfter  int    `json:"retry_after"`
+	Message    string `json:"message"`
+	RetryAfter int    `json:"retry_after"`
 }
 
 // Error 实现error接口
