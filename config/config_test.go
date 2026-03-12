@@ -35,9 +35,9 @@ SYSTEM_PROMPT_INJECT=Test prompt
 TIMEOUT=60
 MAX_INPUT_LENGTH=10000
 USER_AGENT=Test Agent
-SCRIPT_URL=https://test.com/script.js
 VISION_ENABLED=true
 VISION_MODE=api
+VISION_LANGUAGES=eng,chi_sim
 VISION_BASE_URL=https://vision.example/v1/chat/completions
 VISION_API_KEY=vision-key
 VISION_MODEL=gpt-4o-mini`
@@ -76,9 +76,6 @@ VISION_MODEL=gpt-4o-mini`
 	if config.FP.UserAgent != "Test Agent" {
 		t.Errorf("UserAgent = %v, want Test Agent", config.FP.UserAgent)
 	}
-	if config.ScriptURL != "https://test.com/script.js" {
-		t.Errorf("ScriptURL = %v, want https://test.com/script.js", config.ScriptURL)
-	}
 	if !config.Vision.Enabled {
 		t.Errorf("Vision.Enabled = %v, want true", config.Vision.Enabled)
 	}
@@ -94,6 +91,9 @@ VISION_MODEL=gpt-4o-mini`
 	if config.Vision.Model != "gpt-4o-mini" {
 		t.Errorf("Vision.Model = %v, want gpt-4o-mini", config.Vision.Model)
 	}
+	if config.Vision.Languages != "eng,chi_sim" {
+		t.Errorf("Vision.Languages = %v, want eng,chi_sim", config.Vision.Languages)
+	}
 }
 
 func TestLoadConfigFromYAML(t *testing.T) {
@@ -104,6 +104,7 @@ fingerprint:
   user_agent: YAML Agent
 vision:
   mode: ocr
+  languages: eng,chi_sim
   model: gpt-4o-mini
 `
 	if err := os.WriteFile("config.yaml", []byte(yamlContent), 0644); err != nil {
@@ -141,6 +142,9 @@ vision:
 	}
 	if config.Vision.Mode != "ocr" {
 		t.Errorf("Vision.Mode = %v, want ocr", config.Vision.Mode)
+	}
+	if config.Vision.Languages != "eng,chi_sim" {
+		t.Errorf("Vision.Languages = %v, want eng,chi_sim", config.Vision.Languages)
 	}
 }
 

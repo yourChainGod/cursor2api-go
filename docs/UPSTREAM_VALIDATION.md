@@ -71,6 +71,7 @@ If you want the upstream matrix to hit the vision path too, enable vision before
 ```bash
 VISION_ENABLED=true \
 VISION_MODE=ocr \
+VISION_LANGUAGES=eng,chi_sim \
 make upstream-check
 ```
 

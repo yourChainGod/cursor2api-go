@@ -6,7 +6,9 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/imroc/req/v3 v3.55.0
 	github.com/joho/godotenv v1.5.1
+	github.com/otiai10/gosseract/v2 v2.4.1
 	github.com/sirupsen/logrus v1.9.3
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -47,5 +49,4 @@ require (
 	golang.org/x/text v0.26.0 // indirect
 	golang.org/x/tools v0.34.0 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

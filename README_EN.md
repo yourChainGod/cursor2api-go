@@ -29,7 +29,7 @@ A Go service that converts Cursor Web to a basic OpenAI chat completions compati
 ### Requirements
 
 - Go 1.24+
-- Node.js 18+ (for JavaScript execution)
+- For local OCR mode, install Tesseract runtime libraries (for example `libtesseract-dev`, `libleptonica-dev`, `tesseract-ocr-eng`, `tesseract-ocr-chi-sim`)
 
 ### Local Running Methods
 
@@ -62,9 +62,11 @@ cd cursor2api-go
 # Optional: copy the env template first
 cp .env.example .env
 
-# Download dependencies
+# Install Go dependencies
 go mod tidy
-npm install --omit=dev
+
+# If you want local OCR, install Tesseract runtime libraries first (Ubuntu/Debian)
+sudo apt-get install -y libtesseract-dev libleptonica-dev tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
 
 # Build
 go build -o cursor2api-go
@@ -234,7 +236,8 @@ If you prefer YAML, see `config.example.yaml`.
 | `MODELS` | `claude-sonnet-4.6,claude-sonnet-4-5-20250929,...` | Supported models (comma-separated) |
 | `TIMEOUT` | `60` | Request timeout (seconds) |
 | `VISION_ENABLED` | `false` | Enable image preprocessing / OCR |
-| `VISION_MODE` | `ocr` | `ocr` (local OCR) or `api` (external vision model) |
+| `VISION_MODE` | `ocr` | `ocr` (local Tesseract via gosseract) or `api` (external vision model) |
+| `VISION_LANGUAGES` | `eng,chi_sim` | Local OCR languages (comma-separated) |
 | `VISION_BASE_URL` | `https://api.openai.com/v1/chat/completions` | External vision API base URL |
 | `VISION_API_KEY` | `` | Required when `VISION_MODE=api` |
 | `VISION_MODEL` | `gpt-4o-mini` | External vision model name |
@@ -256,8 +259,8 @@ DEBUG=true ./cursor2api-go
 Debug mode displays:
 - Detailed GIN route information
 - Verbose request logs
-- x-is-human token details
-- Browser fingerprint configuration
+- Browser fingerprint / request header details
+- Retry and error handling details
 
 ### Troubleshooting
 
@@ -340,19 +343,22 @@ GOOS=linux GOARCH=amd64 go build -o cursor2api-go-linux
 
 ```
 cursor2api-go/
-├── main.go              # Main entry point (Go version)
-├── config/              # Configuration management (Go version)
-├── handlers/            # HTTP handlers (Go version)
-├── services/            # Business service layer (Go version)
-├── models/              # Data models (Go version)
-├── utils/               # Utility functions (Go version)
-├── middleware/          # Middleware (Go version)
-├── jscode/              # JavaScript code (Go version)
-├── static/              # Static files (Go version)
+├── main.go              # Main entry point
+├── config/              # Configuration management
+├── compat/              # Protocol compatibility, OCR, and tool parsing
+├── handlers/            # HTTP handlers
+├── services/            # Cursor Web service layer
+├── models/              # Data models
+├── utils/               # Utility functions
+├── middleware/          # Middleware
+├── docs/                # Capability matrix and upstream validation docs
+├── scripts/             # smoke / upstream matrix scripts
+├── static/              # Static files
 ├── start.sh             # Linux/macOS startup script
 ├── start-go.bat         # Windows startup script (GBK)
 ├── start-go-utf8.bat    # Windows startup script (UTF-8)
-
+├── .env.example         # Environment variable template
+├── config.example.yaml  # YAML config template
 └── README.md            # Project documentation
 ```
 

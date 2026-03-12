@@ -1,57 +1,51 @@
-# 构建阶段
-FROM golang:1.24-alpine AS builder
+# Build stage
+FROM golang:1.24-bookworm AS builder
 
-# 设置工作目录
 WORKDIR /app
 
-# 安装必要的包
-RUN apk add --no-cache git ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    ca-certificates \
+    git \
+    libtesseract-dev \
+    libleptonica-dev \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-chi-sim \
+  && rm -rf /var/lib/apt/lists/*
 
-# 复制go mod文件
 COPY go.mod go.sum ./
-
-# 下载依赖
 RUN go mod download
 
-# 复制源码
 COPY . .
+RUN go build -o cursor2api-go .
 
-# 构建应用
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o cursor2api-go .
+# Runtime stage
+FROM debian:bookworm-slim
 
-# 运行阶段
-FROM alpine:latest
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    wget \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-chi-sim \
+    libtesseract-dev \
+    libleptonica-dev \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd -r -m -d /app appuser
 
-# 安装 ca-certificates 和 nodejs（用于 JavaScript 执行）
-RUN apk --no-cache add ca-certificates nodejs npm
+WORKDIR /app
 
-# 创建非 root 用户
-RUN adduser -D -g '' appuser
-
-WORKDIR /root/
-
-# 从构建阶段复制二进制文件
-COPY --from=builder /app/cursor2api-go .
-
-# 复制静态文件、JS 代码和 Node 运行时依赖清单（用于 JavaScript 执行 / OCR）
+COPY --from=builder /app/cursor2api-go ./cursor2api-go
 COPY --from=builder /app/static ./static
-COPY --from=builder /app/jscode ./jscode
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/package-lock.json ./package-lock.json
-RUN npm install --omit=dev
 
-# 更改所有者
-RUN chown -R appuser:appuser /root/
-
-# 切换到非root用户
+RUN chown -R appuser:appuser /app
 USER appuser
 
-# 暴露端口
 EXPOSE 8002
 
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:8002/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))" || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8002/health || exit 1
 
-# 启动应用
 CMD ["./cursor2api-go"]

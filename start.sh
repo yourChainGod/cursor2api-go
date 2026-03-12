@@ -41,24 +41,6 @@ check_go() {
     echo -e "${GREEN}✅ Go 版本检查通过: $GO_VERSION${NC}"
 }
 
-# 检查Node.js环境
-check_nodejs() {
-    if ! command -v node &> /dev/null; then
-        echo -e "${RED}❌ Node.js 未安装，请先安装 Node.js 18 或更高版本${NC}"
-        echo -e "${YELLOW}💡 安装方法: https://nodejs.org/${NC}"
-        exit 1
-    fi
-
-    NODE_VERSION=$(node --version | sed 's/v//')
-    REQUIRED_VERSION="18.0.0"
-
-    if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$NODE_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
-        echo -e "${RED}❌ Node.js 版本 $NODE_VERSION 过低，请安装 Node.js $REQUIRED_VERSION 或更高版本${NC}"
-        exit 1
-    fi
-
-    echo -e "${GREEN}✅ Node.js 版本检查通过: $NODE_VERSION${NC}"
-}
 
 # 处理环境配置
 setup_env() {
@@ -78,15 +60,12 @@ SYSTEM_PROMPT_INJECT=
 TIMEOUT=60
 MAX_INPUT_LENGTH=200000
 USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
-UNMASKED_VENDOR_WEBGL=Google Inc. (Intel)
-UNMASKED_RENDERER_WEBGL=ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)
 
-# Cursor配置
-SCRIPT_URL=https://cursor.com/_next/static/chunks/pages/_app.js
 
 # Vision / OCR配置
 VISION_ENABLED=false
 VISION_MODE=ocr
+VISION_LANGUAGES=eng,chi_sim
 VISION_BASE_URL=https://api.openai.com/v1/chat/completions
 VISION_API_KEY=
 VISION_MODEL=gpt-4o-mini
@@ -97,24 +76,10 @@ EOF
     fi
 }
 
-# 安装 Node 运行时依赖（用于 OCR / JS helper）
-install_node_deps() {
-    if [ -f package.json ]; then
-        if [ ! -d node_modules ] || [ ! -f node_modules/tesseract.js/package.json ]; then
-            echo -e "${BLUE}📦 正在安装 Node 运行时依赖...${NC}"
-            npm install --omit=dev
-        else
-            echo -e "${GREEN}✅ Node 运行时依赖已就绪${NC}"
-        fi
-    fi
-}
-
 # 构建应用
 build_app() {
     echo -e "${BLUE}📦 正在下载 Go 依赖...${NC}"
     go mod download
-
-    install_node_deps
 
     echo -e "${BLUE}🔨 正在编译 Go 应用...${NC}"
     go build -o cursor2api-go .
@@ -146,7 +111,6 @@ start_server() {
 main() {
     print_header
     check_go
-    check_nodejs
     setup_env
     build_app
     show_info

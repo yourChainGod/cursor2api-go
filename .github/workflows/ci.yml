@@ -15,7 +15,6 @@ concurrency:
 
 env:
   GO_VERSION: '1.24.0'
-  NODE_VERSION: '22'
 
 permissions:
   contents: read
@@ -33,14 +32,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install Node runtime dependencies
-        run: npm install --omit=dev
+      - name: Install OCR system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config build-essential libleptonica-dev libtesseract-dev tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
 
       - name: Download Go dependencies
         run: go mod download
@@ -73,14 +68,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install Node runtime dependencies
-        run: npm install --omit=dev
+      - name: Install OCR system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config build-essential libleptonica-dev libtesseract-dev tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
 
       - name: Download Go dependencies
         run: go mod download
@@ -107,14 +98,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install Node runtime dependencies
-        run: npm install --omit=dev
+      - name: Install OCR system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config build-essential libleptonica-dev libtesseract-dev tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
 
       - name: Run live smoke checks
         env:
@@ -136,14 +123,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install Node runtime dependencies
-        run: npm install --omit=dev
+      - name: Install OCR system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config build-essential libleptonica-dev libtesseract-dev tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
 
       - name: Run quick upstream matrix
         env:
@@ -168,14 +151,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install Node runtime dependencies
-        run: npm install --omit=dev
+      - name: Install OCR system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config build-essential libleptonica-dev libtesseract-dev tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
 
       - name: Download Go dependencies
         run: go mod download

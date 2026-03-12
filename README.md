@@ -38,7 +38,7 @@
 ### 环境要求
 
 - Go 1.24+
-- Node.js 18+ (用于 JavaScript 执行)
+- 本地 OCR 模式下需要安装 Tesseract 运行库（如 `libtesseract-dev`、`libleptonica-dev`、`tesseract-ocr-eng`、`tesseract-ocr-chi-sim`）
 
 ### 本地运行方式
 
@@ -71,9 +71,11 @@ cd cursor2api-go
 # 可选：先复制环境变量模板
 cp .env.example .env
 
-# 下载依赖
+# 安装 Go 依赖
 go mod tidy
-npm install --omit=dev
+
+# 如需本地 OCR，还需要安装 Tesseract 运行库（Ubuntu/Debian）
+sudo apt-get install -y libtesseract-dev libleptonica-dev tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
 
 # 编译
 go build -o cursor2api-go
@@ -269,7 +271,8 @@ cp .env.example .env
 | `MODELS` | `claude-sonnet-4.6,claude-sonnet-4-5-20250929,...` | 支持的模型列表（逗号分隔） |
 | `TIMEOUT` | `60` | 请求超时时间（秒） |
 | `VISION_ENABLED` | `false` | 是否启用图片预处理 / OCR |
-| `VISION_MODE` | `ocr` | `ocr`（本地 OCR）或 `api`（外部视觉模型） |
+| `VISION_MODE` | `ocr` | `ocr`（本地 Tesseract / gosseract）或 `api`（外部视觉模型） |
+| `VISION_LANGUAGES` | `eng,chi_sim` | 本地 OCR 语言列表（逗号分隔） |
 | `VISION_BASE_URL` | `https://api.openai.com/v1/chat/completions` | 外部视觉 API 地址 |
 | `VISION_API_KEY` | `` | 外部视觉 API Key（`VISION_MODE=api` 时必填） |
 | `VISION_MODEL` | `gpt-4o-mini` | 外部视觉模型名 |
@@ -278,7 +281,7 @@ cp .env.example .env
 
 Go 版现已支持将图片输入在发送到 Cursor Web 前先做预处理：
 
-- `VISION_MODE=ocr`：通过本地 Node + `tesseract.js` 做 OCR（默认推荐）
+- `VISION_MODE=ocr`：通过本地 Tesseract + `gosseract` 做 OCR（默认推荐）
 - `VISION_MODE=api`：转发到外部视觉模型接口
 
 示例：
@@ -286,6 +289,7 @@ Go 版现已支持将图片输入在发送到 Cursor Web 前先做预处理：
 ```bash
 VISION_ENABLED=true \
 VISION_MODE=ocr \
+VISION_LANGUAGES=eng,chi_sim \
 ./cursor2api-go
 ```
 
@@ -306,8 +310,8 @@ DEBUG=true ./cursor2api-go
 调试模式会显示：
 - 详细的 GIN 路由信息
 - 每个请求的详细日志
-- x-is-human token 信息
-- 浏览器指纹配置
+- 浏览器指纹 / 请求头配置
+- 重试与错误处理信息
 
 ### 故障排除
 
@@ -389,19 +393,22 @@ GOOS=linux GOARCH=amd64 go build -o cursor2api-go-linux
 
 ```
 cursor2api-go/
-├── main.go              # 主程序入口 (Go 版本)
-├── config/              # 配置管理 (Go 版本)
-├── handlers/            # HTTP 处理器 (Go 版本)
-├── services/            # 业务服务层 (Go 版本)
-├── models/              # 数据模型 (Go 版本)
-├── utils/               # 工具函数 (Go 版本)
-├── middleware/          # 中间件 (Go 版本)
-├── jscode/              # JavaScript 代码 (Go 版本)
-├── static/              # 静态文件 (Go 版本)
+├── main.go              # 主程序入口
+├── config/              # 配置管理
+├── compat/              # 协议兼容层与 OCR / tool parser
+├── handlers/            # HTTP 处理器
+├── services/            # Cursor Web 服务层
+├── models/              # 数据模型
+├── utils/               # 工具函数
+├── middleware/          # 中间件
+├── docs/                # 能力矩阵 / 上游验证说明
+├── scripts/             # smoke / upstream matrix 脚本
+├── static/              # 静态文档页
 ├── start.sh             # Linux/macOS 启动脚本
 ├── start-go.bat         # Windows 启动脚本 (GBK)
 ├── start-go-utf8.bat    # Windows 启动脚本 (UTF-8)
-
+├── .env.example         # 环境变量模板
+├── config.example.yaml  # YAML 配置模板
 └── README.md            # 项目说明
 ```
 

@@ -12,6 +12,7 @@ vision:
   # If the vision section exists, vision preprocessing is enabled by default.
   enabled: true
   mode: ocr
+  languages: eng,chi_sim
   # For api mode, switch `mode: api` and fill the fields below.
   base_url: https://api.openai.com/v1/chat/completions
   api_key: ""

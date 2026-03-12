@@ -66,13 +66,14 @@ var (
 
 // HeaderGenerator 动态 header 生成器
 type HeaderGenerator struct {
-	profile       BrowserProfile
-	chromeVersion int
-	rng           *rand.Rand
+	profile         BrowserProfile
+	chromeVersion   int
+	rng             *rand.Rand
+	forcedUserAgent string
 }
 
 // NewHeaderGenerator 创建新的 header 生成器
-func NewHeaderGenerator() *HeaderGenerator {
+func NewHeaderGenerator(forcedUserAgent string) *HeaderGenerator {
 	// 使用当前时间作为随机种子
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
@@ -96,11 +97,15 @@ func NewHeaderGenerator() *HeaderGenerator {
 
 	// 生成 User-Agent
 	profile.UserAgent = generateUserAgent(profile)
+	if forcedUserAgent != "" {
+		profile.UserAgent = forcedUserAgent
+	}
 
 	return &HeaderGenerator{
-		profile:       profile,
-		chromeVersion: chromeVersion,
-		rng:           rng,
+		profile:         profile,
+		chromeVersion:   chromeVersion,
+		rng:             rng,
+		forcedUserAgent: forcedUserAgent,
 	}
 }
 
@@ -122,7 +127,7 @@ func generateUserAgent(profile BrowserProfile) string {
 }
 
 // GetChatHeaders 获取聊天请求的 headers
-func (g *HeaderGenerator) GetChatHeaders(xIsHuman string) map[string]string {
+func (g *HeaderGenerator) GetChatHeaders() map[string]string {
 	// 随机选择语言
 	languages := []string{
 		"en-US,en;q=0.9",
@@ -146,7 +151,6 @@ func (g *HeaderGenerator) GetChatHeaders(xIsHuman string) map[string]string {
 		"sec-ch-ua":          g.getSecChUa(),
 		"x-method":           "POST",
 		"sec-ch-ua-mobile":   "?0",
-		"x-is-human":         xIsHuman,
 		"User-Agent":         g.profile.UserAgent,
 		"content-type":       "application/json",
 		"accept-language":    lang,
@@ -159,45 +163,6 @@ func (g *HeaderGenerator) GetChatHeaders(xIsHuman string) map[string]string {
 	if g.profile.Bitness != "" {
 		headers["sec-ch-ua-bitness"] = fmt.Sprintf(`"%s"`, g.profile.Bitness)
 	}
-	if g.profile.PlatformVersion != "" {
-		headers["sec-ch-ua-platform-version"] = fmt.Sprintf(`"%s"`, g.profile.PlatformVersion)
-	}
-
-	return headers
-}
-
-// GetScriptHeaders 获取脚本请求的 headers
-func (g *HeaderGenerator) GetScriptHeaders() map[string]string {
-	// 随机选择语言
-	languages := []string{
-		"en-US,en;q=0.9",
-		"zh-CN,zh;q=0.9,en;q=0.8",
-		"en-GB,en;q=0.9",
-	}
-	lang := languages[g.rng.Intn(len(languages))]
-
-	// 随机选择 referer
-	referers := []string{
-		"https://cursor.com/cn/learn/how-ai-models-work",
-		"https://cursor.com/en-US/learn/how-ai-models-work",
-		"https://cursor.com/",
-	}
-	referer := referers[g.rng.Intn(len(referers))]
-
-	headers := map[string]string{
-		"User-Agent":         g.profile.UserAgent,
-		"sec-ch-ua-arch":     fmt.Sprintf(`"%s"`, g.profile.Architecture),
-		"sec-ch-ua-platform": fmt.Sprintf(`"%s"`, g.profile.Platform),
-		"sec-ch-ua":          g.getSecChUa(),
-		"sec-ch-ua-bitness":  fmt.Sprintf(`"%s"`, g.profile.Bitness),
-		"sec-ch-ua-mobile":   "?0",
-		"sec-fetch-site":     "same-origin",
-		"sec-fetch-mode":     "no-cors",
-		"sec-fetch-dest":     "script",
-		"referer":            referer,
-		"accept-language":    lang,
-	}
-
 	if g.profile.PlatformVersion != "" {
 		headers["sec-ch-ua-platform-version"] = fmt.Sprintf(`"%s"`, g.profile.PlatformVersion)
 	}
@@ -246,6 +211,9 @@ func (g *HeaderGenerator) Refresh() {
 
 	// 生成 User-Agent
 	profile.UserAgent = generateUserAgent(profile)
+	if g.forcedUserAgent != "" {
+		profile.UserAgent = g.forcedUserAgent
+	}
 
 	g.profile = profile
 	g.chromeVersion = chromeVersion

@@ -45,26 +45,24 @@ type Config struct {
 	Timeout            int    `json:"timeout"`
 	MaxInputLength     int    `json:"max_input_length"`
 
-	// Cursor相关配置
-	ScriptURL string `json:"script_url"`
-	FP        FP     `json:"fp"`
-	Vision    Vision `json:"vision"`
+	// 请求头 / 指纹相关配置
+	FP     FP     `json:"fp"`
+	Vision Vision `json:"vision"`
 }
 
 // FP 指纹配置结构
 type FP struct {
-	UserAgent               string `json:"userAgent"`
-	UNMASKED_VENDOR_WEBGL   string `json:"unmaskedVendorWebgl"`
-	UNMASKED_RENDERER_WEBGL string `json:"unmaskedRendererWebgl"`
+	UserAgent string `json:"userAgent"`
 }
 
 // Vision 视觉/OCR配置
 type Vision struct {
-	Enabled bool   `json:"enabled" yaml:"enabled"`
-	Mode    string `json:"mode" yaml:"mode"`
-	BaseURL string `json:"base_url" yaml:"base_url"`
-	APIKey  string `json:"api_key" yaml:"api_key"`
-	Model   string `json:"model" yaml:"model"`
+	Enabled   bool   `json:"enabled" yaml:"enabled"`
+	Mode      string `json:"mode" yaml:"mode"`
+	BaseURL   string `json:"base_url" yaml:"base_url"`
+	APIKey    string `json:"api_key" yaml:"api_key"`
+	Model     string `json:"model" yaml:"model"`
+	Languages string `json:"languages" yaml:"languages"`
 }
 
 type yamlConfig struct {
@@ -93,18 +91,16 @@ func LoadConfig() (*Config, error) {
 		SystemPromptInject: "",
 		Timeout:            60,
 		MaxInputLength:     200000,
-		ScriptURL:          "https://cursor.com/_next/static/chunks/pages/_app.js",
 		FP: FP{
-			UserAgent:               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-			UNMASKED_VENDOR_WEBGL:   "Google Inc. (Intel)",
-			UNMASKED_RENDERER_WEBGL: "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
 		},
 		Vision: Vision{
-			Enabled: false,
-			Mode:    "ocr",
-			BaseURL: "https://api.openai.com/v1/chat/completions",
-			APIKey:  "",
-			Model:   "gpt-4o-mini",
+			Enabled:   false,
+			Mode:      "ocr",
+			BaseURL:   "https://api.openai.com/v1/chat/completions",
+			APIKey:    "",
+			Model:     "gpt-4o-mini",
+			Languages: "eng,chi_sim",
 		},
 	}
 
@@ -197,16 +193,14 @@ func applyEnvOverrides(config *Config) {
 	config.SystemPromptInject = getEnv("SYSTEM_PROMPT_INJECT", config.SystemPromptInject)
 	config.Timeout = getEnvAsInt("TIMEOUT", config.Timeout)
 	config.MaxInputLength = getEnvAsInt("MAX_INPUT_LENGTH", config.MaxInputLength)
-	config.ScriptURL = getEnv("SCRIPT_URL", config.ScriptURL)
 	config.FP.UserAgent = getEnv("USER_AGENT", config.FP.UserAgent)
-	config.FP.UNMASKED_VENDOR_WEBGL = getEnv("UNMASKED_VENDOR_WEBGL", config.FP.UNMASKED_VENDOR_WEBGL)
-	config.FP.UNMASKED_RENDERER_WEBGL = getEnv("UNMASKED_RENDERER_WEBGL", config.FP.UNMASKED_RENDERER_WEBGL)
 
 	config.Vision.Enabled = getEnvAsBool("VISION_ENABLED", config.Vision.Enabled)
 	config.Vision.Mode = getEnv("VISION_MODE", config.Vision.Mode)
 	config.Vision.BaseURL = getEnv("VISION_BASE_URL", config.Vision.BaseURL)
 	config.Vision.APIKey = getEnv("VISION_API_KEY", config.Vision.APIKey)
 	config.Vision.Model = getEnv("VISION_MODEL", config.Vision.Model)
+	config.Vision.Languages = getEnv("VISION_LANGUAGES", config.Vision.Languages)
 }
 
 func mergeVision(base Vision, overlay Vision) Vision {
@@ -222,6 +216,9 @@ func mergeVision(base Vision, overlay Vision) Vision {
 	}
 	if overlay.Model != "" {
 		merged.Model = overlay.Model
+	}
+	if overlay.Languages != "" {
+		merged.Languages = overlay.Languages
 	}
 	if overlay.Enabled {
 		merged.Enabled = true

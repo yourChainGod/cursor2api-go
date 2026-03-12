@@ -1,8 +1,0 @@
-{
-  "name": "cursor2api-go-runtime",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "tesseract.js": "^7.0.0"
-  }
-}

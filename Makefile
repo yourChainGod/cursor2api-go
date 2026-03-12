@@ -9,12 +9,11 @@ APP := cursor2api-go
 PORT ?= 8002
 API_KEY ?= 0000
 
-.PHONY: help deps node-deps test build run smoke upstream-check clean
+.PHONY: help deps test build run smoke upstream-check clean
 
 help:
 	@echo "Targets:"
 	@echo "  make deps           # download Go deps"
-	@echo "  make node-deps      # install Node runtime deps (OCR helper)"
 	@echo "  make test           # run go test ./..."
 	@echo "  make build          # build $(APP)"
 	@echo "  make run            # run the server"
@@ -25,13 +24,10 @@ help:
 deps:
 	$(GO) mod download
 
-node-deps:
-	@if [ -f package.json ]; then npm install --omit=dev; fi
-
 test: deps
 	$(GO) test ./...
 
-build: deps node-deps
+build: deps
 	$(GO) build -o $(APP) .
 
 run:

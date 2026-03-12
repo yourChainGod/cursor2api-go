@@ -31,7 +31,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -392,35 +391,4 @@ func ReadRequestBody(r *http.Request) ([]byte, error) {
 	}
 
 	return body, nil
-}
-
-// RunJS 执行JavaScript代码并返回标准输出内容
-func RunJS(jsCode string) (string, error) {
-	// 添加crypto模块导入并设置为全局变量
-	// 注意：使用stdin时，我们需要确保代码是自包含的
-	finalJS := `const crypto = require('crypto').webcrypto;
-global.crypto = crypto;
-globalThis.crypto = crypto;
-// 在Node.js环境中创建window对象
-if (typeof window === 'undefined') { global.window = global; }
-window.crypto = crypto;
-this.crypto = crypto;
-` + jsCode
-
-	// 执行Node.js命令，使用stdin输入代码
-	cmd := exec.Command("node")
-
-	// 设置输入
-	cmd.Stdin = strings.NewReader(finalJS)
-
-	output, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("node.js execution failed (exit code: %d)\nSTDOUT:\n%s\nSTDERR:\n%s",
-				exitErr.ExitCode(), string(output), string(exitErr.Stderr))
-		}
-		return "", fmt.Errorf("failed to execute node.js: %w", err)
-	}
-
-	return strings.TrimSpace(string(output)), nil
 }

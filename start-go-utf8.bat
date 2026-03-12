@@ -33,7 +33,7 @@ if !MAJOR! LSS 1 (
     pause
     exit /b 1
 )
-if !MAJOR! EQU 1 if !MINOR! LSS 21 (
+if !MAJOR! EQU 1 if !MINOR! LSS 24 (
     echo ❌ Go 版本 !GO_VERSION! 过低，请安装 Go 1.24 或更高版本
     pause
     exit /b 1
@@ -41,28 +41,6 @@ if !MAJOR! EQU 1 if !MINOR! LSS 21 (
 
 echo ✅ Go 版本检查通过: !GO_VERSION!
 
-:: 检查Node.js是否安装
-node --version >nul 2>&1
-if errorlevel 1 (
-    echo ❌ Node.js 未安装，请先安装 Node.js 18 或更高版本
-    echo 💡 安装方法: https://nodejs.org/
-    pause
-    exit /b 1
-)
-
-:: 显示Node.js版本并检查版本号
-for /f "delims=" %%i in ('node --version') do set NODE_VERSION=%%i
-set NODE_VERSION=!NODE_VERSION:v=!
-
-:: 检查Node.js版本是否满足要求 (需要 >= 18)
-for /f "tokens=1 delims=." %%a in ("!NODE_VERSION!") do set NODE_MAJOR=%%a
-if !NODE_MAJOR! LSS 18 (
-    echo ❌ Node.js 版本 !NODE_VERSION! 过低，请安装 Node.js 18 或更高版本
-    pause
-    exit /b 1
-)
-
-echo ✅ Node.js 版本检查通过: !NODE_VERSION!
 
 :: 创建.env文件（如果不存在）
 if not exist .env (
@@ -81,15 +59,12 @@ if not exist .env (
         echo TIMEOUT=60
         echo MAX_INPUT_LENGTH=200000
         echo USER_AGENT=Mozilla/5.0 ^(Windows NT 10.0; Win64; x64^) AppleWebKit/537.36 ^(KHTML, like Gecko^) Chrome/140.0.0.0 Safari/537.36
-        echo UNMASKED_VENDOR_WEBGL=Google Inc. ^(Intel^)
-        echo UNMASKED_RENDERER_WEBGL=ANGLE ^(Intel, Intel^(R^) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11^)
         echo.
-        echo # Cursor配置
-        echo SCRIPT_URL=https://cursor.com/_next/static/chunks/pages/_app.js
         echo.
         echo # Vision / OCR配置
         echo VISION_ENABLED=false
         echo VISION_MODE=ocr
+        echo VISION_LANGUAGES=eng,chi_sim
         echo VISION_BASE_URL=https://api.openai.com/v1/chat/completions
         echo VISION_API_KEY=
         echo VISION_MODEL=gpt-4o-mini
@@ -107,21 +82,6 @@ if errorlevel 1 (
     echo ❌ 依赖下载失败！
     pause
     exit /b 1
-)
-
-:: 安装 Node 运行时依赖（用于 OCR / JS helper）
-if exist package.json (
-    if not exist node_modules\tesseract.js\package.json (
-        echo 📦 正在安装 Node 运行时依赖...
-        npm install --omit=dev
-        if errorlevel 1 (
-            echo ❌ Node 依赖安装失败！
-            pause
-            exit /b 1
-        )
-    ) else (
-        echo ✅ Node 运行时依赖已就绪
-    )
 )
 
 :: 构建应用

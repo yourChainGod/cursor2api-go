@@ -1,9 +1,12 @@
 package compat
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,6 +47,28 @@ func TestApplyVisionInterceptorWithAPI(t *testing.T) {
 	}
 	if blocks[1].Type != "text" || !strings.Contains(blocks[1].Text, "OCR extracted: hello from image") {
 		t.Fatalf("expected OCR description block, got %#v", blocks[1])
+	}
+}
+
+func TestProcessWithLocalOCR(t *testing.T) {
+	cfg := &config.Config{Vision: config.Vision{Enabled: true, Mode: "ocr", Languages: "eng"}}
+	fixturePath := filepath.Join("testdata", "hello_ocr.png")
+	imageBytes, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("failed to read OCR fixture: %v", err)
+	}
+	images := []AnthropicContentBlock{{
+		Type:   "image",
+		Source: &AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: base64.StdEncoding.EncodeToString(imageBytes)},
+	}}
+
+	text, err := processWithLocalOCR(images, cfg)
+	if err != nil {
+		t.Fatalf("expected local OCR to succeed, got error: %v", err)
+	}
+	upper := strings.ToUpper(strings.ReplaceAll(text, " ", ""))
+	if !strings.Contains(upper, "HELLO") {
+		t.Fatalf("expected OCR output to contain HELLO, got %q", text)
 	}
 }
 

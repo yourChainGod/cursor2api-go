@@ -10,7 +10,6 @@ ERRO[0131] Failed to create chat completion              error="{\"error\":\"Acc
 ```
 
 ### 原因分析
-1. **Token 过期**: `x-is-human` token 缓存时间过长,导致 token 失效
 2. **频率限制**: 短时间内发送过多请求触发了 Cursor API 的速率限制
 3. **重复 Token**: 使用相同的 token 进行多次请求被识别为异常行为
 
@@ -24,7 +23,6 @@ ERRO[0131] Failed to create chat completion              error="{\"error\":\"Acc
   - 随机 Chrome 版本 (120-130)
   - 随机语言设置和 Referer
   - 真实的 User-Agent 和 sec-ch-ua headers
-- **缩短缓存时间**: 将 `x-is-human` token 缓存时间从 30 分钟缩短到 1 分钟
 - **自动重试机制**: 遇到 403 错误时自动清除缓存并重试(最多 2 次)
 - **指纹刷新**: 403 错误时自动刷新浏览器指纹配置
 - **错误恢复**: 失败时自动清除缓存,确保下次请求使用新 token
@@ -43,8 +41,6 @@ ERRO[0131] Failed to create chat completion              error="{\"error\":\"Acc
 2. **检查日志**:
    查看是否有以下日志:
    - `Received 403 Access Denied, clearing token cache and retrying...` - 自动重试
-   - `Failed to fetch x-is-human token` - Token 获取失败
-   - `Fetched x-is-human token` - Token 获取成功
 
 3. **等待冷却期**:
    如果频繁遇到 403 错误,建议等待 5-10 分钟后再使用
@@ -55,7 +51,7 @@ ERRO[0131] Failed to create chat completion              error="{\"error\":\"Acc
 #### 3. 预防措施
 
 1. **控制请求频率**: 避免在短时间内发送大量请求
-2. **监控日志**: 注意 `x-is-human token` 的获取频率
+2. **监控日志**: 注意 403 / Cloudflare / 浏览器指纹刷新日志
 3. **合理配置超时**: 在 `.env` 文件中设置合理的超时时间
 
 ### 配置建议
@@ -78,7 +74,7 @@ DEBUG=true ./cursor2api-go
 ```
 
 这将显示:
-- 每次请求的 `x-is-human` token (前 50 字符)
+- 每次请求的关键请求头与响应状态
 - 请求的 payload 大小
 - 重试次数
 - 详细的错误信息
@@ -91,7 +87,7 @@ DEBUG=true ./cursor2api-go
 - User-Agent 不匹配
 - 缺少必要的浏览器指纹
 
-**解决方案**: 检查 `.env` 文件中的浏览器指纹配置（`USER_AGENT`、`UNMASKED_VENDOR_WEBGL`、`UNMASKED_RENDERER_WEBGL`）是否正确。
+**解决方案**: 检查 `.env` 文件中的 `USER_AGENT` 配置，必要时启用 DEBUG 观察请求头。
 
 ### 连接超时
 如果频繁出现连接超时:
@@ -100,15 +96,11 @@ DEBUG=true ./cursor2api-go
 3. 检查防火墙设置
 
 ### Token 获取失败
-如果无法获取 `x-is-human` token:
-1. 检查 `.env` 文件中的 `SCRIPT_URL` 配置是否正确
-2. 确保 `jscode/main.js` 和 `jscode/env.js` 文件存在
-3. 检查 Node.js 环境是否正常安装（Node.js 18+）
 
 ## 联系支持
 
 如果问题仍未解决,请提供以下信息:
 1. 完整的错误日志
 2. `.env` 文件配置（隐藏敏感信息如 `API_KEY`）
-3. 使用的 Go 版本和 Node.js 版本
+3. 使用的 Go 版本与 Tesseract 安装情况
 4. 操作系统信息

@@ -47,7 +47,7 @@ It now exposes three protocol surfaces on top of Cursor Web and includes multipl
 
 ### 4. Vision layers
 
-- Local OCR mode via Node.js + `tesseract.js`
+- Local OCR mode via Tesseract + `gosseract`
 - External vision API mode via OpenAI-compatible image endpoint
 - OpenAI `image_url` payload conversion into Anthropic-style image blocks
 - OCR / image understanding result injected back into the textual conversation before forwarding to Cursor Web

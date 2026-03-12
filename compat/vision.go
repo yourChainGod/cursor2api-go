@@ -1,17 +1,19 @@
 package compat
 
 import (
-	"bytes"
 	"cursor2api-go/config"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/otiai10/gosseract/v2"
 )
+
+var defaultOCRLanguages = []string{"eng", "chi_sim"}
 
 // ApplyVisionInterceptor preprocesses image blocks into textual descriptions/OCR output.
 func ApplyVisionInterceptor(messages []AnthropicMessage, cfg *config.Config) {
@@ -58,45 +60,135 @@ func processVision(images []AnthropicContentBlock, cfg *config.Config) (string, 
 	if strings.EqualFold(cfg.Vision.Mode, "api") {
 		return callVisionAPI(images, cfg)
 	}
-	return processWithLocalOCR(images)
+	return processWithLocalOCR(images, cfg)
 }
 
-func processWithLocalOCR(images []AnthropicContentBlock) (string, error) {
-	payload := map[string]any{
-		"images": images,
-	}
-	blob, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
+func processWithLocalOCR(images []AnthropicContentBlock, cfg *config.Config) (string, error) {
+	client := gosseract.NewClient()
+	defer client.Close()
+
+	if err := client.DisableOutput(); err != nil {
+		return "", fmt.Errorf("disable tesseract output: %w", err)
 	}
 
-	cmd := exec.Command("node", filepath.Join("jscode", "vision_ocr.mjs"))
-	cmd.Stdin = bytes.NewReader(blob)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return "", fmt.Errorf("local OCR failed: %s", strings.TrimSpace(stderr.String()))
+	langs := resolveOCRLanguages(cfg)
+	if err := client.SetLanguage(langs...); err != nil {
+		return "", fmt.Errorf("set tesseract languages: %w", err)
+	}
+
+	parts := make([]string, 0, len(images))
+	for i, img := range images {
+		imageBytes, err := loadOCRImageBytes(img)
+		if err != nil {
+			parts = append(parts, fmt.Sprintf("--- Image %d ---\n(Failed to load image for OCR: %s)", i+1, err.Error()))
+			continue
 		}
-		return "", fmt.Errorf("local OCR failed: %w", err)
+		if err := client.SetImageFromBytes(imageBytes); err != nil {
+			parts = append(parts, fmt.Sprintf("--- Image %d ---\n(Failed to prepare image for OCR: %s)", i+1, err.Error()))
+			continue
+		}
+		text, err := client.Text()
+		if err != nil {
+			parts = append(parts, fmt.Sprintf("--- Image %d ---\n(Failed to parse image with gosseract: %s)", i+1, err.Error()))
+			continue
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			text = "(No text detected in this image)"
+		}
+		parts = append(parts, fmt.Sprintf("--- Image %d OCR Text ---\n%s", i+1, text))
 	}
 
-	var result struct {
-		Text  string `json:"text"`
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		return "", fmt.Errorf("invalid OCR output: %w", err)
-	}
-	if strings.TrimSpace(result.Error) != "" {
-		return "", fmt.Errorf("%s", result.Error)
-	}
-	if strings.TrimSpace(result.Text) == "" {
+	combined := strings.TrimSpace(strings.Join(parts, "\n\n"))
+	if combined == "" {
 		return "No text detected in the attached image(s).", nil
 	}
-	return result.Text, nil
+	return combined, nil
+}
+
+func resolveOCRLanguages(cfg *config.Config) []string {
+	if cfg == nil || strings.TrimSpace(cfg.Vision.Languages) == "" {
+		return defaultOCRLanguages
+	}
+	items := strings.Split(cfg.Vision.Languages, ",")
+	langs := make([]string, 0, len(items))
+	for _, item := range items {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			langs = append(langs, trimmed)
+		}
+	}
+	if len(langs) == 0 {
+		return defaultOCRLanguages
+	}
+	return langs
+}
+
+func loadOCRImageBytes(img AnthropicContentBlock) ([]byte, error) {
+	if img.Source == nil || img.Source.Data == "" {
+		return nil, fmt.Errorf("image source is empty")
+	}
+
+	switch img.Source.Type {
+	case "base64":
+		data := img.Source.Data
+		if strings.HasPrefix(data, "data:") {
+			_, data = parseDataURL(data)
+		}
+		decoded, err := decodeFlexibleBase64(data)
+		if err != nil {
+			return nil, fmt.Errorf("decode base64 image: %w", err)
+		}
+		return decoded, nil
+	case "url":
+		if strings.HasPrefix(img.Source.Data, "data:") {
+			_, data := parseDataURL(img.Source.Data)
+			decoded, err := decodeFlexibleBase64(data)
+			if err != nil {
+				return nil, fmt.Errorf("decode data-url image: %w", err)
+			}
+			return decoded, nil
+		}
+		client := &http.Client{Timeout: 60 * time.Second}
+		resp, err := client.Get(img.Source.Data)
+		if err != nil {
+			return nil, fmt.Errorf("fetch remote image: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+			return nil, fmt.Errorf("fetch remote image returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read remote image body: %w", err)
+		}
+		return data, nil
+	default:
+		return nil, fmt.Errorf("unsupported image source type: %s", img.Source.Type)
+	}
+}
+
+func decodeFlexibleBase64(data string) ([]byte, error) {
+	cleaned := strings.TrimSpace(data)
+	cleaned = strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t', ' ':
+			return -1
+		default:
+			return r
+		}
+	}, cleaned)
+
+	if decoded, err := base64.StdEncoding.DecodeString(cleaned); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.RawStdEncoding.DecodeString(cleaned); err == nil {
+		return decoded, nil
+	}
+	if m := len(cleaned) % 4; m != 0 {
+		cleaned += strings.Repeat("=", 4-m)
+	}
+	return base64.StdEncoding.DecodeString(cleaned)
 }
 
 func callVisionAPI(images []AnthropicContentBlock, cfg *config.Config) (string, error) {
@@ -142,7 +234,7 @@ func callVisionAPI(images []AnthropicContentBlock, cfg *config.Config) (string, 
 	}
 
 	client := &http.Client{Timeout: 120 * time.Second}
-	req, err := http.NewRequest(http.MethodPost, cfg.Vision.BaseURL, bytes.NewReader(blob))
+	req, err := http.NewRequest(http.MethodPost, cfg.Vision.BaseURL, strings.NewReader(string(blob)))
 	if err != nil {
 		return "", err
 	}

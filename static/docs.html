@@ -241,12 +241,13 @@
     <div class="section">
       <h2>Vision / OCR</h2>
       <ul>
-        <li><code>VISION_MODE=ocr</code>：本地 Node + <code>tesseract.js</code> OCR</li>
+        <li><code>VISION_MODE=ocr</code>：本地 Tesseract + <code>gosseract</code> OCR</li>
         <li><code>VISION_MODE=api</code>：外接 OpenAI 兼容视觉模型接口</li>
         <li>图片会在发给 Cursor Web 之前先被提取为文本上下文</li>
       </ul>
       <pre><code>VISION_ENABLED=true \
 VISION_MODE=ocr \
+VISION_LANGUAGES=eng,chi_sim \
 ./cursor2api-go</code></pre>
     </div>
 
