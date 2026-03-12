@@ -149,6 +149,22 @@ curl -X POST http://localhost:8002/v1/messages \
   }'
 ```
 
+### Anthropic Thinking 示例
+
+> `thinking` 是请求级参数，不是环境变量，也不是 YAML / `.env` 常驻配置。
+
+```bash
+curl -X POST http://localhost:8002/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: 0000" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 1024,
+    "thinking": {"type": "enabled", "budget_tokens": 2048},
+    "messages": [{"role": "user", "content": "请先思考，再回答这个问题"}]
+  }'
+```
+
 ### OpenAI Responses API
 
 ```bash
@@ -208,13 +224,19 @@ cp .env.example .env
 
 如果你偏好 YAML，也可以参考：`config.example.yaml`
 
+> `thinking` 不是配置文件项，而是每次请求单独携带的参数。
+
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
 | `PORT` | `8002` | 服务器端口 |
 | `DEBUG` | `false` | 调试模式（启用后显示详细日志和路由信息） |
-| `API_KEY` | `0000` | API 认证密钥 |
-| `MODELS` | `claude-sonnet-4.6,claude-sonnet-4-5-20250929,...` | 支持的模型列表（逗号分隔） |
+| `API_KEY` | `0000` | API 认证密钥（默认值仅建议本地开发使用） |
+| `MODELS` | `claude-sonnet-4.6,claude-sonnet-4-5-20250929,...` | 支持的模型列表（逗号分隔，第一项通常作为默认 / 推荐模型） |
+| `SYSTEM_PROMPT_INJECT` | `` | 追加到有效 system prompt 的额外指令 |
 | `TIMEOUT` | `60` | 请求超时时间（秒） |
+| `MAX_INPUT_LENGTH` | `200000` | 历史消息裁剪阈值（按字符近似） |
+| `PROXY` | `` | 可选代理（支持 http/https/socks5） |
+| `USER_AGENT` | `Mozilla/5.0 ... Chrome/140...` | 覆盖默认浏览器指纹 UA |
 | `VISION_ENABLED` | `false` | 是否启用图片预处理 / OCR |
 | `VISION_MODE` | `ocr` | `ocr`（本地 Tesseract / gosseract）或 `api`（外部视觉模型） |
 | `VISION_LANGUAGES` | `eng,chi_sim` | 本地 OCR 语言列表（逗号分隔） |

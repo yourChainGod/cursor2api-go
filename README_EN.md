@@ -127,6 +127,22 @@ sudo systemctl status cursor2api-go
 curl -H "Authorization: Bearer 0000" http://localhost:8002/v1/models
 ```
 
+### Anthropic Thinking Example
+
+> `thinking` is request-level, not an environment variable and not a persistent YAML / `.env` setting.
+
+```bash
+curl -X POST http://localhost:8002/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: 0000" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 1024,
+    "thinking": {"type": "enabled", "budget_tokens": 2048},
+    "messages": [{"role": "user", "content": "Think first, then answer this question"}]
+  }'
+```
+
 ### Non-Streaming Chat
 
 ```bash
@@ -173,13 +189,19 @@ cp .env.example .env
 
 If you prefer YAML, see `config.example.yaml`.
 
+> `thinking` is not a config-file field; it is sent per request.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8002` | Server port |
 | `DEBUG` | `false` | Debug mode (shows detailed logs and route info when enabled) |
-| `API_KEY` | `0000` | API authentication key |
-| `MODELS` | `claude-sonnet-4.6,claude-sonnet-4-5-20250929,...` | Supported models (comma-separated) |
+| `API_KEY` | `0000` | API authentication key (the default is only suitable for local development) |
+| `MODELS` | `claude-sonnet-4.6,claude-sonnet-4-5-20250929,...` | Supported models (comma-separated; the first item is usually the default / preferred model) |
+| `SYSTEM_PROMPT_INJECT` | `` | Extra instruction appended to the effective system prompt |
 | `TIMEOUT` | `60` | Request timeout (seconds) |
+| `MAX_INPUT_LENGTH` | `200000` | History trimming threshold (approximate characters) |
+| `PROXY` | `` | Optional outbound proxy (http/https/socks5) |
+| `USER_AGENT` | `Mozilla/5.0 ... Chrome/140...` | Override the default browser fingerprint UA |
 | `VISION_ENABLED` | `false` | Enable image preprocessing / OCR |
 | `VISION_MODE` | `ocr` | `ocr` (local Tesseract via gosseract) or `api` (external vision model) |
 | `VISION_LANGUAGES` | `eng,chi_sim` | Local OCR languages (comma-separated) |

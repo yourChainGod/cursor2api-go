@@ -69,11 +69,16 @@ type Vision struct {
 }
 
 type yamlConfig struct {
-	Port        int    `yaml:"port"`
-	Timeout     int    `yaml:"timeout"`
-	Proxy       string `yaml:"proxy"`
-	CursorModel string `yaml:"cursor_model"`
-	Fingerprint struct {
+	Port               int    `yaml:"port"`
+	Debug              bool   `yaml:"debug"`
+	APIKey             string `yaml:"api_key"`
+	Models             string `yaml:"models"`
+	CursorModel        string `yaml:"cursor_model"` // backward-compatible alias
+	SystemPromptInject string `yaml:"system_prompt_inject"`
+	Timeout            int    `yaml:"timeout"`
+	MaxInputLength     int    `yaml:"max_input_length"`
+	Proxy              string `yaml:"proxy"`
+	Fingerprint        struct {
 		UserAgent string `yaml:"user_agent"`
 	} `yaml:"fingerprint"`
 	Vision Vision `yaml:"vision"`
@@ -167,11 +172,23 @@ func applyYAMLConfig(config *Config) {
 		if yc.Port > 0 {
 			config.Port = yc.Port
 		}
+		config.Debug = yc.Debug
+		if strings.TrimSpace(yc.APIKey) != "" {
+			config.APIKey = yc.APIKey
+		}
+		if strings.TrimSpace(yc.Models) != "" {
+			config.Models = yc.Models
+		} else if strings.TrimSpace(yc.CursorModel) != "" {
+			config.Models = yc.CursorModel
+		}
+		if strings.TrimSpace(yc.SystemPromptInject) != "" {
+			config.SystemPromptInject = yc.SystemPromptInject
+		}
 		if yc.Timeout > 0 {
 			config.Timeout = yc.Timeout
 		}
-		if strings.TrimSpace(yc.CursorModel) != "" {
-			config.Models = yc.CursorModel
+		if yc.MaxInputLength > 0 {
+			config.MaxInputLength = yc.MaxInputLength
 		}
 		if strings.TrimSpace(yc.Proxy) != "" {
 			config.Proxy = yc.Proxy

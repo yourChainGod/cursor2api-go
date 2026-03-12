@@ -98,11 +98,17 @@ VISION_MODEL=gpt-4o-mini`
 
 func TestLoadConfigFromYAML(t *testing.T) {
 	yamlContent := `port: 7777
+debug: true
+api_key: yaml-key
+models: claude-sonnet-4.6,claude-sonnet-4-20250514
+system_prompt_inject: YAML prompt
 timeout: 90
-cursor_model: claude-sonnet-4.6
+max_input_length: 123456
+proxy: http://127.0.0.1:7890
 fingerprint:
   user_agent: YAML Agent
 vision:
+  enabled: false
   mode: ocr
   languages: eng,chi_sim
   model: gpt-4o-mini
@@ -113,7 +119,13 @@ vision:
 	defer os.Remove("config.yaml")
 
 	os.Unsetenv("PORT")
+	os.Unsetenv("DEBUG")
+	os.Unsetenv("API_KEY")
+	os.Unsetenv("MODELS")
+	os.Unsetenv("SYSTEM_PROMPT_INJECT")
 	os.Unsetenv("TIMEOUT")
+	os.Unsetenv("MAX_INPUT_LENGTH")
+	os.Unsetenv("PROXY")
 	os.Unsetenv("CURSOR_MODEL")
 	os.Unsetenv("USER_AGENT")
 	os.Unsetenv("VISION_ENABLED")
@@ -121,8 +133,6 @@ vision:
 	os.Unsetenv("VISION_BASE_URL")
 	os.Unsetenv("VISION_API_KEY")
 	os.Unsetenv("VISION_MODEL")
-	os.Setenv("API_KEY", "test-key")
-	defer os.Unsetenv("API_KEY")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -131,14 +141,32 @@ vision:
 	if config.Port != 7777 {
 		t.Errorf("Port = %v, want 7777", config.Port)
 	}
+	if !config.Debug {
+		t.Errorf("Debug = %v, want true", config.Debug)
+	}
+	if config.APIKey != "yaml-key" {
+		t.Errorf("APIKey = %v, want yaml-key", config.APIKey)
+	}
+	if config.Models != "claude-sonnet-4.6,claude-sonnet-4-20250514" {
+		t.Errorf("Models = %v, want YAML models", config.Models)
+	}
+	if config.SystemPromptInject != "YAML prompt" {
+		t.Errorf("SystemPromptInject = %v, want YAML prompt", config.SystemPromptInject)
+	}
 	if config.Timeout != 90 {
 		t.Errorf("Timeout = %v, want 90", config.Timeout)
+	}
+	if config.MaxInputLength != 123456 {
+		t.Errorf("MaxInputLength = %v, want 123456", config.MaxInputLength)
+	}
+	if config.Proxy != "http://127.0.0.1:7890" {
+		t.Errorf("Proxy = %v, want proxy from YAML", config.Proxy)
 	}
 	if config.FP.UserAgent != "YAML Agent" {
 		t.Errorf("UserAgent = %v, want YAML Agent", config.FP.UserAgent)
 	}
-	if !config.Vision.Enabled {
-		t.Errorf("Vision.Enabled = %v, want true when vision section exists", config.Vision.Enabled)
+	if config.Vision.Enabled {
+		t.Errorf("Vision.Enabled = %v, want false when explicitly disabled", config.Vision.Enabled)
 	}
 	if config.Vision.Mode != "ocr" {
 		t.Errorf("Vision.Mode = %v, want ocr", config.Vision.Mode)

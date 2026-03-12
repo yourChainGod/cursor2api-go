@@ -1,22 +1,40 @@
 # Example YAML config for cursor2api-go
 # The Go service supports both environment variables and YAML.
+# Prefer `.env.example` if you want a 1:1 mirror of runtime environment variables.
 
 port: 8002
-timeout: 60
+debug: false
 
+# ⚠️ For local development only. Change this in any shared or public deployment.
+api_key: "0000"
+
+# Comma-separated supported models. The first one is typically the default / preferred model.
+models: claude-sonnet-4.6,claude-sonnet-4-5-20250929,claude-sonnet-4-20250514,claude-3-5-sonnet-20241022
+
+# Optional extra instruction appended to the effective system prompt.
+system_prompt_inject: ""
+
+timeout: 60
+max_input_length: 200000
+
+# Optional outbound proxy for Cursor Web / external Vision API traffic.
 # proxy: http://127.0.0.1:7890
 # proxy: socks5://127.0.0.1:1080
-cursor_model: claude-sonnet-4.6
 
 fingerprint:
   user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
 
 vision:
-  # If the vision section exists, vision preprocessing is enabled by default.
-  enabled: true
+  enabled: false
   mode: ocr
   languages: eng,chi_sim
   # For api mode, switch `mode: api` and fill the fields below.
   base_url: https://api.openai.com/v1/chat/completions
   api_key: ""
   model: gpt-4o-mini
+
+# Anthropic thinking mode is request-level, not config-level.
+# Example request fragment:
+# thinking:
+#   type: enabled
+#   budget_tokens: 2048
