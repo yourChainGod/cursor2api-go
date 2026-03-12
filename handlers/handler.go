@@ -417,6 +417,7 @@ func (h *Handler) streamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, a
 	parser := compat.NewStreamResponseParser(len(body.Tools) > 0, false)
 	var fullText bytes.Buffer
 	var toolSeen bool
+	toolCallIndex := 0
 
 	emitSegments := func(segments []compat.ResponseSegment) {
 		for _, seg := range segments {
@@ -436,10 +437,12 @@ func (h *Handler) streamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, a
 				}
 				toolSeen = true
 				callID := "call_" + randomID(24)
-				writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: 0, ID: callID, Type: "function", Function: compat.OpenAIStreamFunctionPayload{Name: seg.ToolCall.Name, Arguments: ""}}}}, FinishReason: nil}}})
+				idx := toolCallIndex
+				toolCallIndex++
+				writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: idx, ID: callID, Type: "function", Function: compat.OpenAIStreamFunctionPayload{Name: seg.ToolCall.Name, Arguments: ""}}}}, FinishReason: nil}}})
 				argsJSON, _ := json.Marshal(seg.ToolCall.Arguments)
 				for _, chunk := range chunkString(string(argsJSON), 128) {
-					writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: 0, Function: compat.OpenAIStreamFunctionPayload{Arguments: chunk}}}}, FinishReason: nil}}})
+					writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: idx, Function: compat.OpenAIStreamFunctionPayload{Arguments: chunk}}}}, FinishReason: nil}}})
 				}
 			}
 		}
