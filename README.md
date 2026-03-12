@@ -43,26 +43,7 @@
 
 ### 本地运行方式
 
-#### 方法一：直接运行（推荐用于开发）
-
-**Linux/macOS**:
-```bash
-git clone https://github.com/libaxuan/cursor2api-go.git
-cd cursor2api-go
-chmod +x start.sh
-./start.sh
-```
-
-**Windows**:
-```batch
-# 双击运行或在 cmd 中执行
-start-go.bat
-
-# 或在 Git Bash / Windows Terminal 中
-./start-go-utf8.bat
-```
-
-#### 方法二：手动编译运行
+#### 方法一：手动编译运行（推荐）
 
 ```bash
 # 克隆项目
@@ -85,61 +66,24 @@ go build -o cursor2api-go
 ./cursor2api-go
 ```
 
-#### 方法三：使用 go run
+#### 方法二：使用 go run
 
 ```bash
 git clone https://github.com/libaxuan/cursor2api-go.git
 cd cursor2api-go
-go run main.go
+go run .
+```
+
+#### 方法三：使用 Makefile
+
+```bash
+make build
+make run
 ```
 
 服务将在 `http://localhost:8002` 启动
 
 ## 🚀 服务器部署方式
-
-### Docker 部署
-
-1. **构建镜像**:
-```bash
-# 构建镜像
-docker build -t cursor2api-go .
-```
-
-2. **运行容器**:
-```bash
-# 运行容器（推荐）
-docker run -d \
-  --name cursor2api-go \
-  --restart unless-stopped \
-  -p 8002:8002 \
-  -e API_KEY=your-secret-key \
-  -e DEBUG=false \
-  cursor2api-go
-
-# 或者使用默认配置运行
-docker run -d --name cursor2api-go --restart unless-stopped -p 8002:8002 cursor2api-go
-```
-
-### Docker Compose 部署（推荐用于生产环境）
-
-1. **使用 docker-compose.yml**:
-```bash
-# 启动服务
-docker-compose up -d
-
-# 停止服务
-docker-compose down
-
-# 查看日志
-docker-compose logs -f
-```
-
-2. **自定义配置**:
-修改 `docker-compose.yml` 文件中的环境变量以满足您的需求：
-- 修改 `API_KEY` 为安全的密钥
-- 根据需要调整 `MODELS`、`TIMEOUT`、`MAX_INPUT_LENGTH`
-- 如需图片预处理，配置 `VISION_ENABLED` / `VISION_MODE` / `VISION_*`
-- 更改暴露的端口
 
 ### 系统服务部署（Linux）
 
@@ -323,15 +267,6 @@ DEBUG=true ./cursor2api-go
 - Cloudflare 拦截
 
 
-### Windows 启动脚本说明
-
-项目提供两个 Windows 启动脚本：
-
-- **`start-go.bat`** (推荐): GBK 编码，完美兼容 Windows cmd.exe
-- **`start-go-utf8.bat`**: UTF-8 编码，适用于 Git Bash、PowerShell、Windows Terminal
-
-两个脚本功能完全相同，仅显示样式不同。如遇乱码请使用 `start-go.bat`。
-
 ## 🧪 开发
 
 ### 运行测试
@@ -416,9 +351,6 @@ cursor2api-go/
 ├── docs/                # 能力矩阵 / 上游验证说明
 ├── scripts/             # smoke / upstream matrix 脚本
 ├── static/              # 静态文档页
-├── start.sh             # Linux/macOS 启动脚本
-├── start-go.bat         # Windows 启动脚本 (GBK)
-├── start-go-utf8.bat    # Windows 启动脚本 (UTF-8)
 ├── .env.example         # 环境变量模板
 ├── config.example.yaml  # YAML 配置模板
 └── README.md            # 项目说明

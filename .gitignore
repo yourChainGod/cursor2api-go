@@ -8,6 +8,7 @@
 # Go build output
 cursor2api-go
 cursor2api-go.exe
+cursor2api-go-test
 
 # Test binary, built with `go test -c`
 *.test

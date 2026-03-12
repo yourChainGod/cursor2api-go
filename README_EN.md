@@ -34,26 +34,7 @@ A Go-based Cursor Web compatibility service supporting OpenAI Chat Completions, 
 
 ### Local Running Methods
 
-#### Method 1: Direct Run (Recommended for development)
-
-**Linux/macOS**:
-```bash
-git clone https://github.com/libaxuan/cursor2api-go.git
-cd cursor2api-go
-chmod +x start.sh
-./start.sh
-```
-
-**Windows**:
-```batch
-# Double-click or run in cmd
-start-go.bat
-
-# Or in Git Bash / Windows Terminal
-./start-go-utf8.bat
-```
-
-#### Method 2: Manual Compile and Run
+#### Method 1: Manual Compile and Run (Recommended)
 
 ```bash
 # Clone the project
@@ -76,61 +57,24 @@ go build -o cursor2api-go
 ./cursor2api-go
 ```
 
-#### Method 3: Using go run
+#### Method 2: Using go run
 
 ```bash
 git clone https://github.com/libaxuan/cursor2api-go.git
 cd cursor2api-go
-go run main.go
+go run .
+```
+
+#### Method 3: Using Makefile
+
+```bash
+make build
+make run
 ```
 
 The service will start at `http://localhost:8002`
 
 ## 🚀 Server Deployment Methods
-
-### Docker Deployment
-
-1. **Build Image**:
-```bash
-# Build image
-docker build -t cursor2api-go .
-```
-
-2. **Run Container**:
-```bash
-# Run container (recommended)
-docker run -d \
-  --name cursor2api-go \
-  --restart unless-stopped \
-  -p 8002:8002 \
-  -e API_KEY=your-secret-key \
-  -e DEBUG=false \
-  cursor2api-go
-
-# Or run with default configuration
-docker run -d --name cursor2api-go --restart unless-stopped -p 8002:8002 cursor2api-go
-```
-
-### Docker Compose Deployment (Recommended for production)
-
-1. **Using docker-compose.yml**:
-```bash
-# Start service
-docker-compose up -d
-
-# Stop service
-docker-compose down
-
-# View logs
-docker-compose logs -f
-```
-
-2. **Custom Configuration**:
-Modify the environment variables in the `docker-compose.yml` file to meet your needs:
-- Change `API_KEY` to a secure key
-- Adjust `MODELS`, `TIMEOUT`, and `MAX_INPUT_LENGTH` as needed
-- If you want image preprocessing, configure `VISION_ENABLED` / `VISION_MODE` / `VISION_*`
-- Change the exposed port
 
 ### System Service Deployment (Linux)
 
@@ -272,15 +216,6 @@ Having issues? Check the **[Troubleshooting Guide](TROUBLESHOOTING.md)** for sol
 - Cloudflare blocking
 
 
-### Windows Startup Scripts
-
-Two Windows startup scripts are provided:
-
-- **`start-go.bat`** (Recommended): GBK encoding, perfect compatibility with Windows cmd.exe
-- **`start-go-utf8.bat`**: UTF-8 encoding, for Git Bash, PowerShell, Windows Terminal
-
-Both scripts have identical functionality, only display styles differ. Use `start-go.bat` if you encounter encoding issues.
-
 ## 🧪 Development
 
 ### Running Tests
@@ -366,9 +301,6 @@ cursor2api-go/
 ├── docs/                # Capability matrix and upstream validation docs
 ├── scripts/             # smoke / upstream matrix scripts
 ├── static/              # Static files
-├── start.sh             # Linux/macOS startup script
-├── start-go.bat         # Windows startup script (GBK)
-├── start-go-utf8.bat    # Windows startup script (UTF-8)
 ├── .env.example         # Environment variable template
 ├── config.example.yaml  # YAML config template
 └── README.md            # Project documentation

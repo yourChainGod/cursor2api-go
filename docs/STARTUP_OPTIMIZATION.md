@@ -122,9 +122,9 @@ func printStartupBanner(cfg *config.Config) {
 ./cursor2api-go
 ```
 
-或者使用启动脚本：
+或者直接使用：
 ```bash
-./start.sh
+go run .
 ```
 
 ### 调试模式
