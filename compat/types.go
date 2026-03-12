@@ -12,6 +12,13 @@ type AnthropicRequest struct {
 	Temperature   *float64             `json:"temperature,omitempty"`
 	TopP          *float64             `json:"top_p,omitempty"`
 	StopSequences []string             `json:"stop_sequences,omitempty"`
+	Thinking      *ThinkingConfig      `json:"thinking,omitempty"`
+}
+
+// ThinkingConfig controls Claude's extended thinking mode.
+type ThinkingConfig struct {
+	Type         string `json:"type"`                    // "enabled" or "disabled"
+	BudgetTokens int    `json:"budget_tokens,omitempty"` // max thinking tokens
 }
 
 type AnthropicToolChoice struct {
@@ -27,6 +34,7 @@ type AnthropicMessage struct {
 type AnthropicContentBlock struct {
 	Type      string                 `json:"type"`
 	Text      string                 `json:"text,omitempty"`
+	Thinking  string                 `json:"thinking,omitempty"`
 	Source    *AnthropicImageSource  `json:"source,omitempty"`
 	ID        string                 `json:"id,omitempty"`
 	Name      string                 `json:"name,omitempty"`
@@ -159,4 +167,11 @@ type OpenAIStreamFunctionPayload struct {
 type ParsedToolCall struct {
 	Name      string
 	Arguments map[string]interface{}
+}
+
+type ResponseSegment struct {
+	Type     string
+	Text     string
+	Thinking string
+	ToolCall *ParsedToolCall
 }

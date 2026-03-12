@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-A Go-based Cursor Web compatibility service supporting OpenAI Chat Completions, Anthropic Messages, OpenAI Responses, tools / function calling, and Vision / OCR preprocessing.
+A Go-based Cursor Web compatibility service supporting OpenAI Chat Completions, Anthropic Messages, OpenAI Responses, tools / function calling, Anthropic thinking mode, and Vision / OCR preprocessing.
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-orange.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
@@ -14,6 +14,7 @@ A Go-based Cursor Web compatibility service supporting OpenAI Chat Completions, 
 - ✅ OpenAI Responses API compatibility (`/v1/responses`)
 - ✅ Streaming and non-streaming responses
 - ✅ Tools / function calling support with compatibility parsing
+- ✅ Anthropic thinking mode compatibility (`thinking` → `<thinking>` parsing + streaming blocks)
 - ✅ Refusal interception, response sanitization, identity-probe mock responses
 - ✅ Truncation detection + auto-continue for tool outputs
 - ✅ Vision / OCR preprocessing (`ocr` or external `api` mode)

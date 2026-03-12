@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 简体中文
 
-一个以 Go 实现的 Cursor Web 协议兼容服务，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses、tools / function calling、以及 Vision / OCR 预处理。
+一个以 Go 实现的 Cursor Web 协议兼容服务，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses、tools / function calling、Anthropic thinking 模式、以及 Vision / OCR 预处理。
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-orange.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
@@ -22,6 +22,7 @@
 - ✅ 兼容 Anthropic Messages API（`/v1/messages`）
 - ✅ 兼容 OpenAI Responses API（`/v1/responses`，适配 Cursor IDE Agent 模式）
 - ✅ 支持流式和非流式响应
+- ✅ 支持 Anthropic thinking 模式（`thinking` → `<thinking>` 解析与 streaming block 输出）
 - ✅ 支持 tools / function calling 与工具调用解析
 - ✅ 内置拒绝拦截、响应清洗、tool_choice=any 兜底重试
 - ✅ 支持身份探针拦截与模拟 Claude 响应

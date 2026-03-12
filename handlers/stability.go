@@ -363,6 +363,10 @@ func deepCloneAnthropicRequest(body *compat.AnthropicRequest) *compat.AnthropicR
 		tc := *body.ToolChoice
 		clone.ToolChoice = &tc
 	}
+	if body.Thinking != nil {
+		thinking := *body.Thinking
+		clone.Thinking = &thinking
+	}
 	return &clone
 }
 

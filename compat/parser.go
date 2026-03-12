@@ -15,8 +15,92 @@ var (
 	fieldPattern           = regexp.MustCompile(`"([^"]+)"\s*:\s*"((?:[^"\\]|\\.)*)"`)
 )
 
+const (
+	thinkingStartTag = "<thinking>"
+	thinkingEndTag   = "</thinking>"
+)
+
 func HasToolCalls(text string) bool {
 	return strings.Contains(text, "```json")
+}
+
+// ParseResponseSegments splits a model response into ordered text / thinking /
+// tool_use segments. Tool blocks are parsed into structured calls. Thinking
+// blocks are emitted in-order and stripped from plain text.
+func ParseResponseSegments(responseText string) []ResponseSegment {
+	segments := make([]ResponseSegment, 0)
+	pos := 0
+	for pos < len(responseText) {
+		nextThinking := strings.Index(responseText[pos:], thinkingStartTag)
+		nextTool := -1
+		if loc := openJSONBlockPattern.FindStringIndex(responseText[pos:]); loc != nil {
+			nextTool = loc[0]
+		}
+
+		markerType := ""
+		markerRel := -1
+		switch {
+		case nextThinking >= 0 && (nextTool == -1 || nextThinking < nextTool):
+			markerType = "thinking"
+			markerRel = nextThinking
+		case nextTool >= 0:
+			markerType = "tool"
+			markerRel = nextTool
+		default:
+			if tail := responseText[pos:]; tail != "" {
+				segments = appendTextSegment(segments, tail)
+			}
+			pos = len(responseText)
+			continue
+		}
+
+		markerAbs := pos + markerRel
+		if markerAbs > pos {
+			segments = appendTextSegment(segments, responseText[pos:markerAbs])
+		}
+
+		if markerType == "thinking" {
+			start := markerAbs + len(thinkingStartTag)
+			endRel := strings.Index(responseText[start:], thinkingEndTag)
+			if endRel == -1 {
+				segments = append(segments, ResponseSegment{Type: "thinking", Thinking: strings.TrimSpace(responseText[start:])})
+				pos = len(responseText)
+				continue
+			}
+			end := start + endRel
+			segments = append(segments, ResponseSegment{Type: "thinking", Thinking: strings.TrimSpace(responseText[start:end])})
+			pos = end + len(thinkingEndTag)
+			continue
+		}
+
+		openLoc := openJSONBlockPattern.FindStringIndex(responseText[markerAbs:])
+		if openLoc == nil {
+			segments = appendTextSegment(segments, responseText[markerAbs:])
+			pos = len(responseText)
+			continue
+		}
+		contentStart := markerAbs + openLoc[1]
+		closingPos := findClosingFence(responseText, contentStart)
+		endPos := len(responseText)
+		jsonContent := strings.TrimSpace(responseText[contentStart:])
+		if closingPos >= 0 {
+			jsonContent = strings.TrimSpace(responseText[contentStart:closingPos])
+			endPos = closingPos + 3
+		}
+		if parsed, err := tolerantParse(jsonContent); err == nil {
+			name, args := extractToolPayload(parsed)
+			if name != "" {
+				args = fixToolCallArguments(name, args)
+				call := ParsedToolCall{Name: name, Arguments: args}
+				segments = append(segments, ResponseSegment{Type: "tool_use", ToolCall: &call})
+				pos = endPos
+				continue
+			}
+		}
+		segments = appendTextSegment(segments, responseText[markerAbs:endPos])
+		pos = endPos
+	}
+	return mergeAdjacentTextSegments(segments)
 }
 
 func ParseToolCalls(responseText string) ([]ParsedToolCall, string) {
@@ -196,6 +280,28 @@ func tolerantRegexParse(input string) (map[string]interface{}, error) {
 	}
 	result["parameters"] = params
 	return result, nil
+}
+
+func appendTextSegment(segments []ResponseSegment, text string) []ResponseSegment {
+	if text == "" {
+		return segments
+	}
+	return append(segments, ResponseSegment{Type: "text", Text: text})
+}
+
+func mergeAdjacentTextSegments(segments []ResponseSegment) []ResponseSegment {
+	if len(segments) <= 1 {
+		return segments
+	}
+	merged := make([]ResponseSegment, 0, len(segments))
+	for _, seg := range segments {
+		if seg.Type == "text" && len(merged) > 0 && merged[len(merged)-1].Type == "text" {
+			merged[len(merged)-1].Text += seg.Text
+			continue
+		}
+		merged = append(merged, seg)
+	}
+	return merged
 }
 
 func extractJSONObject(input string) (string, bool) {

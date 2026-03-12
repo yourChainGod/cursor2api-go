@@ -117,6 +117,51 @@ func TestConvertAnthropicToCursorRequestNoToolsReframesAndCleansHistory(t *testi
 	}
 }
 
+func TestParseResponseSegmentsThinkingAndTool(t *testing.T) {
+	response := "Intro\n<thinking>Plan carefully</thinking>\n```json action\n{\n  \"tool\": \"Read\",\n  \"parameters\": {\n    \"file_path\": \"main.go\"\n  }\n}\n```\nDone"
+	segments := ParseResponseSegments(response)
+	if len(segments) < 4 {
+		t.Fatalf("expected at least 4 segments, got %d: %#v", len(segments), segments)
+	}
+	if segments[0].Type != "text" || !strings.Contains(segments[0].Text, "Intro") {
+		t.Fatalf("unexpected first segment: %#v", segments[0])
+	}
+	foundThinking := false
+	foundTool := false
+	foundDone := false
+	for _, seg := range segments {
+		if seg.Type == "thinking" && seg.Thinking == "Plan carefully" {
+			foundThinking = true
+		}
+		if seg.Type == "tool_use" && seg.ToolCall != nil && seg.ToolCall.Name == "Read" {
+			foundTool = true
+		}
+		if seg.Type == "text" && strings.Contains(seg.Text, "Done") {
+			foundDone = true
+		}
+	}
+	if !foundThinking || !foundTool || !foundDone {
+		t.Fatalf("missing expected segments: thinking=%v tool=%v done=%v segments=%#v", foundThinking, foundTool, foundDone, segments)
+	}
+}
+
+func TestConvertAnthropicToCursorRequestThinkingHint(t *testing.T) {
+	cfg := &config.Config{Models: "claude-sonnet-4.6"}
+	request := &AnthropicRequest{
+		Model:    "claude-sonnet-4.6",
+		Messages: []AnthropicMessage{{Role: "user", Content: "Solve this"}},
+		Thinking: &ThinkingConfig{Type: "enabled", BudgetTokens: 2048},
+	}
+	cursorReq := ConvertAnthropicToCursorRequest(request, cfg)
+	if len(cursorReq.Messages) == 0 {
+		t.Fatalf("expected cursor messages")
+	}
+	text := cursorReq.Messages[0].Parts[0].Text
+	if !containsAll(text, []string{"<thinking>", "2048 tokens"}) {
+		t.Fatalf("expected thinking hint in user message, got %q", text)
+	}
+}
+
 func containsAll(text string, needles []string) bool {
 	for _, needle := range needles {
 		if !strings.Contains(text, needle) {

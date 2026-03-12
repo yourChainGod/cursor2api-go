@@ -85,6 +85,7 @@ Current automated coverage includes:
 - Identity / refusal handling
 - OCR preprocessing path
 - Startup/local OCR self-check
+- Anthropic thinking block compatibility
 - HTTP-level regression coverage
 
 ### What still depends on real upstream behavior

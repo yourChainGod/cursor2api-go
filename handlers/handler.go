@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -180,32 +181,7 @@ func (h *Handler) nonStreamAnthropic(c *gin.Context, body *compat.AnthropicReque
 		return
 	}
 
-	content := make([]compat.AnthropicContentBlock, 0)
-	stopReason := "end_turn"
-	if len(body.Tools) > 0 && isTruncated(result.Text) {
-		stopReason = "max_tokens"
-	}
-	if len(body.Tools) > 0 {
-		toolCalls, cleanText := compat.ParseToolCalls(result.Text)
-		if len(toolCalls) > 0 {
-			stopReason = "tool_use"
-			if isRefusal(cleanText) {
-				cleanText = ""
-			}
-			cleanText = sanitizeResponse(cleanText)
-			if cleanText != "" {
-				content = append(content, compat.AnthropicContentBlock{Type: "text", Text: cleanText})
-			}
-			for _, tc := range toolCalls {
-				content = append(content, compat.AnthropicContentBlock{Type: "tool_use", ID: "toolu_" + randomID(24), Name: tc.Name, Input: tc.Arguments})
-			}
-		} else {
-			content = append(content, compat.AnthropicContentBlock{Type: "text", Text: sanitizeResponse(result.Text)})
-		}
-	} else {
-		content = append(content, compat.AnthropicContentBlock{Type: "text", Text: sanitizeResponse(result.Text)})
-	}
-
+	content, stopReason := buildAnthropicContentBlocks(body, result.Text)
 	if len(content) == 0 {
 		content = append(content, compat.AnthropicContentBlock{Type: "text", Text: ""})
 	}
@@ -261,53 +237,37 @@ func (h *Handler) streamAnthropic(c *gin.Context, body *compat.AnthropicRequest)
 		},
 	})
 
+	content, stopReason := buildAnthropicContentBlocks(body, result.Text)
 	blockIndex := 0
-	stopReason := "end_turn"
-	if len(body.Tools) > 0 && isTruncated(result.Text) {
-		stopReason = "max_tokens"
-	}
-	if len(body.Tools) > 0 {
-		toolCalls, cleanText := compat.ParseToolCalls(result.Text)
-		if isRefusal(cleanText) {
-			cleanText = ""
-		}
-		cleanText = sanitizeResponse(cleanText)
-		if cleanText != "" {
-			writeAnthropicTextBlock(c, blockIndex, cleanText)
+	for _, block := range content {
+		switch block.Type {
+		case "text":
+			writeAnthropicTextBlock(c, blockIndex, block.Text)
 			blockIndex++
-		}
-		if len(toolCalls) > 0 {
-			stopReason = "tool_use"
-			for _, tc := range toolCalls {
-				toolID := "toolu_" + randomID(24)
-				writeAnthropicSSE(c, "content_block_start", gin.H{
-					"type":  "content_block_start",
-					"index": blockIndex,
-					"content_block": gin.H{
-						"type":  "tool_use",
-						"id":    toolID,
-						"name":  tc.Name,
-						"input": gin.H{},
-					},
-				})
-				argsJSON, _ := json.Marshal(tc.Arguments)
-				for _, chunk := range chunkString(string(argsJSON), 128) {
-					writeAnthropicSSE(c, "content_block_delta", gin.H{
-						"type":  "content_block_delta",
-						"index": blockIndex,
-						"delta": gin.H{"type": "input_json_delta", "partial_json": chunk},
-					})
-				}
-				writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": blockIndex})
-				blockIndex++
+		case "thinking":
+			writeAnthropicThinkingBlock(c, blockIndex, block.Thinking)
+			blockIndex++
+		case "tool_use":
+			toolID := block.ID
+			if toolID == "" {
+				toolID = "toolu_" + randomID(24)
 			}
-		} else if cleanText == "" {
-			writeAnthropicTextBlock(c, blockIndex, sanitizeResponse(result.Text))
+			writeAnthropicSSE(c, "content_block_start", gin.H{
+				"type":          "content_block_start",
+				"index":         blockIndex,
+				"content_block": gin.H{"type": "tool_use", "id": toolID, "name": block.Name, "input": gin.H{}},
+			})
+			argsJSON, _ := json.Marshal(block.Input)
+			for _, chunk := range chunkString(string(argsJSON), 128) {
+				writeAnthropicSSE(c, "content_block_delta", gin.H{
+					"type":  "content_block_delta",
+					"index": blockIndex,
+					"delta": gin.H{"type": "input_json_delta", "partial_json": chunk},
+				})
+			}
+			writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": blockIndex})
 			blockIndex++
 		}
-	} else {
-		writeAnthropicTextBlock(c, blockIndex, sanitizeResponse(result.Text))
-		blockIndex++
 	}
 
 	writeAnthropicSSE(c, "message_delta", gin.H{
@@ -611,6 +571,52 @@ func randomID(length int) string {
 	return utils.GenerateRandomString(length)
 }
 
+func buildAnthropicContentBlocks(body *compat.AnthropicRequest, text string) ([]compat.AnthropicContentBlock, string) {
+	stopReason := "end_turn"
+	if len(body.Tools) > 0 && isTruncated(text) {
+		stopReason = "max_tokens"
+	}
+
+	thinkingEnabled := body.Thinking != nil && strings.EqualFold(body.Thinking.Type, "enabled")
+	useSegments := thinkingEnabled || len(body.Tools) > 0
+	segments := []compat.ResponseSegment{{Type: "text", Text: text}}
+	if useSegments {
+		segments = compat.ParseResponseSegments(text)
+	}
+
+	content := make([]compat.AnthropicContentBlock, 0, len(segments))
+	toolSeen := false
+	for _, seg := range segments {
+		switch seg.Type {
+		case "thinking":
+			if thinkingEnabled && strings.TrimSpace(seg.Thinking) != "" {
+				content = append(content, compat.AnthropicContentBlock{Type: "thinking", Thinking: seg.Thinking})
+			}
+		case "tool_use":
+			if seg.ToolCall != nil {
+				toolSeen = true
+				content = append(content, compat.AnthropicContentBlock{Type: "tool_use", ID: "toolu_" + randomID(24), Name: seg.ToolCall.Name, Input: seg.ToolCall.Arguments})
+			}
+		case "text":
+			cleanText := sanitizeResponse(seg.Text)
+			if len(body.Tools) > 0 && isRefusal(seg.Text) {
+				cleanText = ""
+			}
+			if strings.TrimSpace(cleanText) != "" {
+				content = append(content, compat.AnthropicContentBlock{Type: "text", Text: cleanText})
+			}
+		}
+	}
+
+	if toolSeen {
+		stopReason = "tool_use"
+	}
+	if len(content) == 0 {
+		content = append(content, compat.AnthropicContentBlock{Type: "text", Text: sanitizeResponse(text)})
+	}
+	return content, stopReason
+}
+
 func chunkString(value string, size int) []string {
 	if value == "" || size <= 0 {
 		return []string{value}
@@ -629,6 +635,12 @@ func chunkString(value string, size int) []string {
 func writeAnthropicTextBlock(c *gin.Context, index int, text string) {
 	writeAnthropicSSE(c, "content_block_start", gin.H{"type": "content_block_start", "index": index, "content_block": gin.H{"type": "text", "text": ""}})
 	writeAnthropicSSE(c, "content_block_delta", gin.H{"type": "content_block_delta", "index": index, "delta": gin.H{"type": "text_delta", "text": text}})
+	writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": index})
+}
+
+func writeAnthropicThinkingBlock(c *gin.Context, index int, thinking string) {
+	writeAnthropicSSE(c, "content_block_start", gin.H{"type": "content_block_start", "index": index, "content_block": gin.H{"type": "thinking", "thinking": ""}})
+	writeAnthropicSSE(c, "content_block_delta", gin.H{"type": "content_block_delta", "index": index, "delta": gin.H{"type": "thinking_delta", "thinking": thinking}})
 	writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": index})
 }
 
