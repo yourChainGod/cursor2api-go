@@ -62,6 +62,10 @@ func NewCursorService(cfg *config.Config) (*CursorService, error) {
 	if jar != nil {
 		client.SetCookieJar(jar)
 	}
+	if cfg.Proxy != "" {
+		client.SetProxyURL(cfg.Proxy)
+		logrus.WithField("proxy", cfg.Proxy).Info("Using proxy for Cursor API requests")
+	}
 
 	service := &CursorService{
 		config:          cfg,

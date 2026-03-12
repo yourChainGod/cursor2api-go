@@ -3,6 +3,9 @@
 
 port: 8002
 timeout: 60
+
+# proxy: http://127.0.0.1:7890
+# proxy: socks5://127.0.0.1:1080
 cursor_model: claude-sonnet-4.6
 
 fingerprint:

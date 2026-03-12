@@ -75,33 +75,89 @@ var identityProbePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)你\s*是[^。，,\.]{0,5}(?:AI|人工智能|助手|机器人|模型|Claude|GPT|Gemini)`),
 }
 
-var cursorIdentityPatterns = []struct{ old, new string }{
-	{`(?i)I\s+am\s+(?:a\s+)?(?:support\s+)?assistant\s+for\s+Cursor`, `I am Claude, an AI assistant by Anthropic`},
-	{`(?i)I(?:'m|\s+am)\s+(?:a\s+)?Cursor(?:'s)?\s+(?:support\s+)?assistant`, `I am Claude, an AI assistant by Anthropic`},
-	{`(?i)Cursor(?:'s)?\s+support\s+assistant`, `Claude, an AI assistant by Anthropic`},
-	{`(?i)support\s+assistant\s+for\s+Cursor`, `Claude, an AI assistant by Anthropic`},
-	{`(?i)I\s+run\s+(?:on|in)\s+Cursor(?:'s)?\s+(?:support\s+)?system`, `I am Claude, running on Anthropic's infrastructure`},
-	{`(?i)Cursor\s+support`, `Claude support`},
-	{`(?i)Cursor\s+IDE`, `Claude`},
-	{`(?i)Cursor\s+assistant`, `Claude`},
-	{`(?i)help\s+with\s+coding\s+and\s+Cursor\s+IDE\s+questions`, `help with a wide range of tasks`},
-	{`(?i)Cursor\s+IDE\s+(?:features|questions|related)`, `various topics`},
-	{`(?i)unrelated\s+to\s+(?:programming|coding)(?:\s+or\s+Cursor)?`, `a general knowledge question`},
-	{`(?i)(?:a\s+)?(?:programming|coding|Cursor)[- ]related\s+question`, `a question`},
-	{`(?i)questions\s+about\s+Cursor(?:'s)?\s+(?:features|editor|IDE|pricing|the\s+AI)`, `your questions`},
-	{`(?i)help\s+(?:you\s+)?with\s+(?:questions\s+about\s+)?Cursor`, `help you with your tasks`},
-	{`(?i)about\s+the\s+Cursor\s+(?:AI\s+)?(?:code\s+)?editor`, ``},
-	{`(?i)Cursor(?:'s)?\s+(?:features|editor|code\s+editor|IDE),?\s*(?:pricing|troubleshooting|billing)`, `programming, analysis, and technical questions`},
-	{`我是\s*Cursor\s*的?\s*支持助手`, `我是 Claude，由 Anthropic 开发的 AI 助手`},
-	{`Cursor\s*的?\s*支持(?:系统|助手)`, `Claude，Anthropic 的 AI 助手`},
-	{`运行在\s*Cursor\s*的?\s*(?:支持)?系统中`, `运行在 Anthropic 的基础设施上`},
-	{`帮助你解答\s*Cursor\s*相关的?\s*问题`, `帮助你解答各种问题`},
-	{`关于\s*Cursor\s*(?:编辑器|IDE)?\s*的?\s*问题`, `你的问题`},
-	{`专门.*?回答.*?(?:Cursor|编辑器).*?问题`, `可以回答各种技术和非技术问题`},
-	{`(?:功能使用[、,]\s*)?账单[、,]\s*(?:故障排除|定价)`, `编程、分析和各种技术问题`},
-	{`故障排除等`, `等各种问题`},
-	{`我的职责是帮助你解答`, `我可以帮助你解答`},
-	{`如果你有关于\s*Cursor\s*的问题`, `如果你有任何问题`},
+// Pre-compiled identity replacement patterns (avoid re-compiling on every request).
+var compiledIdentityPatterns []struct {
+	re  *regexp.Regexp
+	rep string
+}
+
+// Pre-compiled cleanup patterns for sanitizeResponse.
+var compiledCleanupPatterns []*regexp.Regexp
+
+// Pre-compiled patterns used in isTruncated.
+var (
+	truncOpenTagRe  = regexp.MustCompile(`(?m)^<[a-zA-Z]`)
+	truncCloseTagRe = regexp.MustCompile(`(?m)^</[a-zA-Z]`)
+)
+
+// Pre-compiled sanitize tail patterns.
+var (
+	promptInjectionRe = regexp.MustCompile(`(?i)prompt\s+injection|social\s+engineering|I\s+need\s+to\s+stop\s+and\s+flag|What\s+I\s+will\s+not\s+do`)
+	twoToolsEnRe      = regexp.MustCompile(`(?i)(?:I\s+)?(?:only\s+)?have\s+(?:access\s+to\s+)?(?:two|2)\s+tools?[^.]*\.`)
+	twoToolsZh1Re     = regexp.MustCompile(`工具.*?只有.*?(?:两|2)个[^。]*。`)
+	twoToolsZh2Re     = regexp.MustCompile(`我有以下.*?(?:两|2)个工具[^。]*。?`)
+	twoToolsZh3Re     = regexp.MustCompile(`我有.*?(?:两|2)个工具[^。]*[。：:]?`)
+	readFileRe        = regexp.MustCompile("(?i)\\*\\*`?read_file`?\\*\\*[^\n]*\n(?:[^\n]*\n){0,3}")
+	readDirRe         = regexp.MustCompile("(?i)\\*\\*`?read_dir`?\\*\\*[^\n]*\n(?:[^\n]*\n){0,3}")
+	readBothRe        = regexp.MustCompile("(?i)\\d+\\.\\s*\\*\\*`?read_(?:file|dir)`?\\*\\*[^\n]*")
+	warningRe         = regexp.MustCompile(`[⚠注意].*?(?:不是|并非|无法).*?(?:本地文件|代码库|执行代码)[^。\n]*[。]?\s*`)
+)
+
+func init() {
+	rawIdentityPatterns := []struct{ old, new string }{
+		{`(?i)I\s+am\s+(?:a\s+)?(?:support\s+)?assistant\s+for\s+Cursor`, `I am Claude, an AI assistant by Anthropic`},
+		{`(?i)I(?:'m|\s+am)\s+(?:a\s+)?Cursor(?:'s)?\s+(?:support\s+)?assistant`, `I am Claude, an AI assistant by Anthropic`},
+		{`(?i)Cursor(?:'s)?\s+support\s+assistant`, `Claude, an AI assistant by Anthropic`},
+		{`(?i)support\s+assistant\s+for\s+Cursor`, `Claude, an AI assistant by Anthropic`},
+		{`(?i)I\s+run\s+(?:on|in)\s+Cursor(?:'s)?\s+(?:support\s+)?system`, `I am Claude, running on Anthropic's infrastructure`},
+		{`(?i)Cursor\s+support`, `Claude support`},
+		{`(?i)Cursor\s+IDE`, `Claude`},
+		{`(?i)Cursor\s+assistant`, `Claude`},
+		{`(?i)help\s+with\s+coding\s+and\s+Cursor\s+IDE\s+questions`, `help with a wide range of tasks`},
+		{`(?i)Cursor\s+IDE\s+(?:features|questions|related)`, `various topics`},
+		{`(?i)unrelated\s+to\s+(?:programming|coding)(?:\s+or\s+Cursor)?`, `a general knowledge question`},
+		{`(?i)(?:a\s+)?(?:programming|coding|Cursor)[- ]related\s+question`, `a question`},
+		{`(?i)questions\s+about\s+Cursor(?:'s)?\s+(?:features|editor|IDE|pricing|the\s+AI)`, `your questions`},
+		{`(?i)help\s+(?:you\s+)?with\s+(?:questions\s+about\s+)?Cursor`, `help you with your tasks`},
+		{`(?i)about\s+the\s+Cursor\s+(?:AI\s+)?(?:code\s+)?editor`, ``},
+		{`(?i)Cursor(?:'s)?\s+(?:features|editor|code\s+editor|IDE),?\s*(?:pricing|troubleshooting|billing)`, `programming, analysis, and technical questions`},
+		{`我是\s*Cursor\s*的?\s*支持助手`, `我是 Claude，由 Anthropic 开发的 AI 助手`},
+		{`Cursor\s*的?\s*支持(?:系统|助手)`, `Claude，Anthropic 的 AI 助手`},
+		{`运行在\s*Cursor\s*的?\s*(?:支持)?系统中`, `运行在 Anthropic 的基础设施上`},
+		{`帮助你解答\s*Cursor\s*相关的?\s*问题`, `帮助你解答各种问题`},
+		{`关于\s*Cursor\s*(?:编辑器|IDE)?\s*的?\s*问题`, `你的问题`},
+		{`专门.*?回答.*?(?:Cursor|编辑器).*?问题`, `可以回答各种技术和非技术问题`},
+		{`(?:功能使用[、,]\s*)?账单[、,]\s*(?:故障排除|定价)`, `编程、分析和各种技术问题`},
+		{`故障排除等`, `等各种问题`},
+		{`我的职责是帮助你解答`, `我可以帮助你解答`},
+		{`如果你有关于\s*Cursor\s*的问题`, `如果你有任何问题`},
+	}
+	compiledIdentityPatterns = make([]struct {
+		re  *regexp.Regexp
+		rep string
+	}, len(rawIdentityPatterns))
+	for i, p := range rawIdentityPatterns {
+		compiledIdentityPatterns[i] = struct {
+			re  *regexp.Regexp
+			rep string
+		}{re: regexp.MustCompile(p.old), rep: p.new}
+	}
+
+	rawCleanup := []string{
+		`(?i)(?:please\s+)?ask\s+a\s+(?:programming|coding)\s+(?:or\s+(?:Cursor[- ]related\s+)?)?question`,
+		`(?i)(?:I'?m|I\s+am)\s+here\s+to\s+help\s+with\s+coding\s+and\s+Cursor[^.]*\.`,
+		`(?i)(?:finding\s+)?relevant\s+Cursor\s+(?:or\s+)?(?:coding\s+)?documentation`,
+		`(?i)AI\s+chat,\s+code\s+completion,\s+rules,\s+context,?\s+etc\.?`,
+		`(?:与|和|或)\s*Cursor\s*(?:相关|有关)`,
+		`Cursor\s*(?:相关|有关)\s*(?:或|和|的)`,
+		`这个问题与\s*(?:Cursor\s*或?\s*)?(?:软件开发|编程|代码|开发)\s*无关[^。\n]*[。，,]?\s*`,
+		`(?:与\s*)?(?:Cursor|编程|代码|开发|软件开发)\s*(?:无关|不相关)[^。\n]*[。，,]?\s*`,
+		`如果有?\s*(?:Cursor\s*)?(?:相关|有关).*?(?:欢迎|请)\s*(?:继续)?(?:提问|询问)[。！!]?\s*`,
+	}
+	compiledCleanupPatterns = make([]*regexp.Regexp, len(rawCleanup))
+	for i, p := range rawCleanup {
+		compiledCleanupPatterns[i] = regexp.MustCompile(p)
+	}
 }
 
 const claudeIdentityResponse = `I am Claude, made by Anthropic. I'm an AI assistant designed to be helpful, harmless, and honest. I can help you with writing, analysis, coding, math, and more.
@@ -130,39 +186,25 @@ func isRefusal(text string) bool {
 
 func sanitizeResponse(text string) string {
 	result := text
-	for _, item := range cursorIdentityPatterns {
-		re := regexp.MustCompile(item.old)
-		result = re.ReplaceAllString(result, item.new)
+	for _, item := range compiledIdentityPatterns {
+		result = item.re.ReplaceAllString(result, item.rep)
 	}
-
-	cleanupPatterns := []string{
-		`(?i)(?:please\s+)?ask\s+a\s+(?:programming|coding)\s+(?:or\s+(?:Cursor[- ]related\s+)?)?question`,
-		`(?i)(?:I'?m|I\s+am)\s+here\s+to\s+help\s+with\s+coding\s+and\s+Cursor[^.]*\.`,
-		`(?i)(?:finding\s+)?relevant\s+Cursor\s+(?:or\s+)?(?:coding\s+)?documentation`,
-		`(?i)AI\s+chat,\s+code\s+completion,\s+rules,\s+context,?\s+etc\.?`,
-		`(?:与|和|或)\s*Cursor\s*(?:相关|有关)`,
-		`Cursor\s*(?:相关|有关)\s*(?:或|和|的)`,
-		`这个问题与\s*(?:Cursor\s*或?\s*)?(?:软件开发|编程|代码|开发)\s*无关[^。\n]*[。，,]?\s*`,
-		`(?:与\s*)?(?:Cursor|编程|代码|开发|软件开发)\s*(?:无关|不相关)[^。\n]*[。，,]?\s*`,
-		`如果有?\s*(?:Cursor\s*)?(?:相关|有关).*?(?:欢迎|请)\s*(?:继续)?(?:提问|询问)[。！!]?\s*`,
-	}
-	for _, pattern := range cleanupPatterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range compiledCleanupPatterns {
 		result = re.ReplaceAllString(result, "")
 	}
 
-	if regexp.MustCompile(`(?i)prompt\s+injection|social\s+engineering|I\s+need\s+to\s+stop\s+and\s+flag|What\s+I\s+will\s+not\s+do`).MatchString(result) {
+	if promptInjectionRe.MatchString(result) {
 		return claudeIdentityResponse
 	}
 
-	result = regexp.MustCompile(`(?i)(?:I\s+)?(?:only\s+)?have\s+(?:access\s+to\s+)?(?:two|2)\s+tools?[^.]*\.`).ReplaceAllString(result, "")
-	result = regexp.MustCompile(`工具.*?只有.*?(?:两|2)个[^。]*。`).ReplaceAllString(result, "")
-	result = regexp.MustCompile(`我有以下.*?(?:两|2)个工具[^。]*。?`).ReplaceAllString(result, "")
-	result = regexp.MustCompile(`我有.*?(?:两|2)个工具[^。]*[。：:]?`).ReplaceAllString(result, "")
-	result = regexp.MustCompile(`(?i)\*\*`+"`?read_file`?"+`\*\*[^\n]*\n(?:[^\n]*\n){0,3}`).ReplaceAllString(result, "")
-	result = regexp.MustCompile(`(?i)\*\*`+"`?read_dir`?"+`\*\*[^\n]*\n(?:[^\n]*\n){0,3}`).ReplaceAllString(result, "")
-	result = regexp.MustCompile(`(?i)\d+\.\s*\*\*`+"`?read_(?:file|dir)`?"+`\*\*[^\n]*`).ReplaceAllString(result, "")
-	result = regexp.MustCompile(`[⚠注意].*?(?:不是|并非|无法).*?(?:本地文件|代码库|执行代码)[^。\n]*[。]?\s*`).ReplaceAllString(result, "")
+	result = twoToolsEnRe.ReplaceAllString(result, "")
+	result = twoToolsZh1Re.ReplaceAllString(result, "")
+	result = twoToolsZh2Re.ReplaceAllString(result, "")
+	result = twoToolsZh3Re.ReplaceAllString(result, "")
+	result = readFileRe.ReplaceAllString(result, "")
+	result = readDirRe.ReplaceAllString(result, "")
+	result = readBothRe.ReplaceAllString(result, "")
+	result = warningRe.ReplaceAllString(result, "")
 
 	result = strings.TrimSpace(result)
 	if result == "" {
@@ -277,10 +319,50 @@ func buildRetryRequest(body *compat.AnthropicRequest, attempt int) *compat.Anthr
 	return clone
 }
 
+// deepCloneAnthropicRequest performs a type-safe deep clone that preserves
+// []AnthropicContentBlock in Message.Content (JSON round-trip would degrade
+// them into []interface{}/map[string]interface{}).
 func deepCloneAnthropicRequest(body *compat.AnthropicRequest) *compat.AnthropicRequest {
-	blob, _ := json.Marshal(body)
-	var clone compat.AnthropicRequest
-	_ = json.Unmarshal(blob, &clone)
+	clone := *body
+	clone.Messages = make([]compat.AnthropicMessage, len(body.Messages))
+	for i, msg := range body.Messages {
+		clone.Messages[i] = compat.AnthropicMessage{Role: msg.Role}
+		switch v := msg.Content.(type) {
+		case string:
+			clone.Messages[i].Content = v
+		case []compat.AnthropicContentBlock:
+			blocks := make([]compat.AnthropicContentBlock, len(v))
+			for j, b := range v {
+				blocks[j] = b
+				if b.Input != nil {
+					inputCopy := make(map[string]interface{}, len(b.Input))
+					for k, val := range b.Input {
+						inputCopy[k] = val
+					}
+					blocks[j].Input = inputCopy
+				}
+				if b.Source != nil {
+					srcCopy := *b.Source
+					blocks[j].Source = &srcCopy
+				}
+			}
+			clone.Messages[i].Content = blocks
+		default:
+			// Fallback: JSON round-trip for unknown types ([]interface{}, etc.)
+			blob, _ := json.Marshal(v)
+			var generic interface{}
+			_ = json.Unmarshal(blob, &generic)
+			clone.Messages[i].Content = generic
+		}
+	}
+	if len(body.Tools) > 0 {
+		clone.Tools = make([]compat.AnthropicTool, len(body.Tools))
+		copy(clone.Tools, body.Tools)
+	}
+	if body.ToolChoice != nil {
+		tc := *body.ToolChoice
+		clone.ToolChoice = &tc
+	}
 	return &clone
 }
 
@@ -295,13 +377,13 @@ func isTruncated(text string) bool {
 	if strings.Count(trimmed, "```json action") > 0 && strings.Count(trimmed, "```") < strings.Count(trimmed, "```json action")*2 {
 		return true
 	}
-	openTags := regexp.MustCompile(`(?m)^<[a-zA-Z]`).FindAllStringIndex(trimmed, -1)
-	closeTags := regexp.MustCompile(`(?m)^</[a-zA-Z]`).FindAllStringIndex(trimmed, -1)
+	openTags := truncOpenTagRe.FindAllStringIndex(trimmed, -1)
+	closeTags := truncCloseTagRe.FindAllStringIndex(trimmed, -1)
 	if len(openTags) > len(closeTags) {
 		return true
 	}
 	last := trimmed[len(trimmed)-1]
-	if strings.HasSuffix(trimmed, `"`) || strings.HasSuffix(trimmed, `\`) {
+	if last == '"' || last == '\\' {
 		return true
 	}
 	if last == '{' || last == '[' || last == ':' || last == ',' {
@@ -416,18 +498,4 @@ func mergeUsage(a, b models.Usage) models.Usage {
 		CompletionTokens: a.CompletionTokens + b.CompletionTokens,
 		TotalTokens:      max(a.TotalTokens, a.PromptTokens+a.CompletionTokens) + max(b.TotalTokens, b.PromptTokens+b.CompletionTokens),
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

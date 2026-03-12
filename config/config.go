@@ -45,6 +45,9 @@ type Config struct {
 	Timeout            int    `json:"timeout"`
 	MaxInputLength     int    `json:"max_input_length"`
 
+	// 网络配置
+	Proxy string `json:"proxy"`
+
 	// 请求头 / 指纹相关配置
 	FP     FP     `json:"fp"`
 	Vision Vision `json:"vision"`
@@ -68,6 +71,7 @@ type Vision struct {
 type yamlConfig struct {
 	Port        int    `yaml:"port"`
 	Timeout     int    `yaml:"timeout"`
+	Proxy       string `yaml:"proxy"`
 	CursorModel string `yaml:"cursor_model"`
 	Fingerprint struct {
 		UserAgent string `yaml:"user_agent"`
@@ -169,6 +173,9 @@ func applyYAMLConfig(config *Config) {
 		if strings.TrimSpace(yc.CursorModel) != "" {
 			config.Models = yc.CursorModel
 		}
+		if strings.TrimSpace(yc.Proxy) != "" {
+			config.Proxy = yc.Proxy
+		}
 		if strings.TrimSpace(yc.Fingerprint.UserAgent) != "" {
 			config.FP.UserAgent = yc.Fingerprint.UserAgent
 		}
@@ -201,6 +208,8 @@ func applyEnvOverrides(config *Config) {
 	config.Vision.APIKey = getEnv("VISION_API_KEY", config.Vision.APIKey)
 	config.Vision.Model = getEnv("VISION_MODEL", config.Vision.Model)
 	config.Vision.Languages = getEnv("VISION_LANGUAGES", config.Vision.Languages)
+
+	config.Proxy = getEnv("PROXY", config.Proxy)
 }
 
 func mergeVision(base Vision, overlay Vision) Vision {
