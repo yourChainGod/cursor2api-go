@@ -289,6 +289,17 @@ Both scripts have identical functionality, only display styles differ. Use `star
 go test ./...
 ```
 
+### Running the local self-check
+
+```bash
+./scripts/local_self_check.sh
+
+# or
+make self-check
+```
+
+When `VISION_ENABLED=true && VISION_MODE=ocr`, the service also performs a startup OCR self-check. If Tesseract or the required language packs are missing, startup fails early with a clear error.
+
 ### Running the live smoke script
 
 ```bash

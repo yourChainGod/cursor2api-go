@@ -72,6 +72,13 @@ func TestProcessWithLocalOCR(t *testing.T) {
 	}
 }
 
+func TestCheckLocalOCR(t *testing.T) {
+	cfg := &config.Config{Vision: config.Vision{Enabled: true, Mode: "ocr", Languages: "eng"}}
+	if err := CheckLocalOCR(cfg); err != nil {
+		t.Fatalf("expected local OCR self-check to pass, got %v", err)
+	}
+}
+
 func TestConvertOpenAIImageURLToAnthropicImageBlock(t *testing.T) {
 	msg := OpenAIMessage{
 		Role: "user",

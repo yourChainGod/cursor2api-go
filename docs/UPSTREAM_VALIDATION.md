@@ -88,9 +88,10 @@ make upstream-check
 
 ## Recommended operator workflow
 
-1. `make test`
-2. `make smoke`
-3. `make upstream-check`
+1. `make self-check`
+2. `make test`
+3. `make smoke`
+4. `make upstream-check`
 
 That order gives you:
 

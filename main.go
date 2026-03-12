@@ -36,7 +36,7 @@ func main() {
 
 	// 禁用 Gin 的调试信息输出
 	gin.DisableConsoleColor()
-	
+
 	// 创建路由器（使用 gin.New() 而不是 gin.Default() 以避免默认日志）
 	router := gin.New()
 
@@ -50,7 +50,10 @@ func main() {
 	}
 
 	// 创建处理器
-	handler := handlers.NewHandler(cfg)
+	handler, err := handlers.NewHandler(cfg)
+	if err != nil {
+		logrus.Fatalf("Failed to create handler: %v", err)
+	}
 
 	// 注册路由
 	setupRoutes(router, handler)

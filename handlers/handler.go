@@ -30,8 +30,11 @@ type Handler struct {
 }
 
 // NewHandler 创建新的处理器
-func NewHandler(cfg *config.Config) *Handler {
-	cursorService := services.NewCursorService(cfg)
+func NewHandler(cfg *config.Config) (*Handler, error) {
+	cursorService, err := services.NewCursorService(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	docsPath := "static/docs.html"
 	var docsContent []byte
@@ -45,7 +48,7 @@ func NewHandler(cfg *config.Config) *Handler {
 		config:        cfg,
 		cursorService: cursorService,
 		docsContent:   docsContent,
-	}
+	}, nil
 }
 
 // ListModels 列出可用模型

@@ -8,8 +8,9 @@ GO ?= $(shell \
 APP := cursor2api-go
 PORT ?= 8002
 API_KEY ?= 0000
+VISION_LANGUAGES ?= eng,chi_sim
 
-.PHONY: help deps test build run smoke upstream-check clean
+.PHONY: help deps test build run self-check smoke upstream-check clean
 
 help:
 	@echo "Targets:"
@@ -17,6 +18,7 @@ help:
 	@echo "  make test           # run go test ./..."
 	@echo "  make build          # build $(APP)"
 	@echo "  make run            # run the server"
+	@echo "  make self-check     # run local OCR/backend self-check"
 	@echo "  make smoke          # run live smoke checks"
 	@echo "  make upstream-check # run live upstream matrix checks"
 	@echo "  make clean          # remove built binary"
@@ -32,6 +34,9 @@ build: deps
 
 run:
 	PORT=$(PORT) API_KEY=$(API_KEY) $(GO) run .
+
+self-check:
+	VISION_LANGUAGES=$(VISION_LANGUAGES) GO_BIN=$(GO) ./scripts/local_self_check.sh
 
 smoke:
 	PORT=$(PORT) API_KEY=$(API_KEY) ./scripts/e2e_smoke.sh

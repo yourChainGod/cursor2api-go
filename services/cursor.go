@@ -22,6 +22,7 @@ package services
 
 import (
 	"context"
+	"cursor2api-go/compat"
 	"cursor2api-go/config"
 	"cursor2api-go/middleware"
 	"cursor2api-go/models"
@@ -49,7 +50,7 @@ type CursorService struct {
 }
 
 // NewCursorService creates a new service instance.
-func NewCursorService(cfg *config.Config) *CursorService {
+func NewCursorService(cfg *config.Config) (*CursorService, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		logrus.Warnf("failed to create cookie jar: %v", err)
@@ -62,11 +63,20 @@ func NewCursorService(cfg *config.Config) *CursorService {
 		client.SetCookieJar(jar)
 	}
 
-	return &CursorService{
+	service := &CursorService{
 		config:          cfg,
 		client:          client,
 		headerGenerator: utils.NewHeaderGenerator(cfg.FP.UserAgent),
 	}
+
+	if err := compat.CheckLocalOCR(cfg); err != nil {
+		return nil, err
+	}
+	if cfg != nil && cfg.Vision.Enabled && strings.EqualFold(cfg.Vision.Mode, "ocr") {
+		logrus.WithField("languages", cfg.Vision.Languages).Info("Local OCR self-check passed")
+	}
+
+	return service, nil
 }
 
 // ChatCompletion creates a chat completion stream for the given request.

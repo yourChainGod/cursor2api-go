@@ -84,6 +84,7 @@ Current automated coverage includes:
 - Tool call parsing and streaming shape conversion
 - Identity / refusal handling
 - OCR preprocessing path
+- Startup/local OCR self-check
 - HTTP-level regression coverage
 
 ### What still depends on real upstream behavior

@@ -340,6 +340,17 @@ DEBUG=true ./cursor2api-go
 go test ./...
 ```
 
+### 运行本地自检
+
+```bash
+./scripts/local_self_check.sh
+
+# 或
+make self-check
+```
+
+当 `VISION_ENABLED=true && VISION_MODE=ocr` 时，服务启动也会自动执行本地 OCR 自检；若 Tesseract 或语言包缺失，会直接明确报错并阻止启动。
+
 ### 运行 live smoke
 
 ```bash

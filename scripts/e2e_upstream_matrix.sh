@@ -302,7 +302,7 @@ run_optional_vision_probe() {
   local name="vision-probe"
   local data_url payload resp status body
   data_url="$(mk_png_data_url)"
-  payload="$(python3 - <<'PY'
+  payload="$(DATA_URL="$data_url" python3 - <<'PY'
 import json, os
 print(json.dumps({
   'model': 'claude-sonnet-4.6',

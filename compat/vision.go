@@ -2,6 +2,7 @@ package compat
 
 import (
 	"cursor2api-go/config"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,9 @@ import (
 )
 
 var defaultOCRLanguages = []string{"eng", "chi_sim"}
+
+//go:embed testdata/hello_ocr.png
+var localOCRSelfCheckPNG []byte
 
 // ApplyVisionInterceptor preprocesses image blocks into textual descriptions/OCR output.
 func ApplyVisionInterceptor(messages []AnthropicMessage, cfg *config.Config) {
@@ -61,6 +65,30 @@ func processVision(images []AnthropicContentBlock, cfg *config.Config) (string, 
 		return callVisionAPI(images, cfg)
 	}
 	return processWithLocalOCR(images, cfg)
+}
+
+// CheckLocalOCR performs a startup/self-check of the local OCR backend when
+// VISION_ENABLED=true and VISION_MODE=ocr. It is intentionally strict so the
+// service fails early instead of silently accepting a broken OCR environment.
+func CheckLocalOCR(cfg *config.Config) error {
+	if cfg == nil || !cfg.Vision.Enabled || !strings.EqualFold(cfg.Vision.Mode, "ocr") {
+		return nil
+	}
+	if len(localOCRSelfCheckPNG) == 0 {
+		return fmt.Errorf("local OCR self-check fixture is empty")
+	}
+	text, err := processWithLocalOCR([]AnthropicContentBlock{{
+		Type:   "image",
+		Source: &AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: base64.StdEncoding.EncodeToString(localOCRSelfCheckPNG)},
+	}}, cfg)
+	if err != nil {
+		return fmt.Errorf("local OCR self-check failed: %w", err)
+	}
+	normalized := strings.ToUpper(strings.ReplaceAll(text, " ", ""))
+	if !strings.Contains(normalized, "HELLO") {
+		return fmt.Errorf("local OCR self-check failed: unexpected OCR output %q", text)
+	}
+	return nil
 }
 
 func processWithLocalOCR(images []AnthropicContentBlock, cfg *config.Config) (string, error) {
