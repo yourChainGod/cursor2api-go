@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-A Go service that converts Cursor Web to a basic OpenAI chat completions compatible API, suitable for local deployment.
+A Go-based Cursor Web compatibility service supporting OpenAI Chat Completions, Anthropic Messages, OpenAI Responses, tools / function calling, and Vision / OCR preprocessing.
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-orange.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)

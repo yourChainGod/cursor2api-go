@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 简体中文
 
-一个将 Cursor Web 转换为基础 OpenAI chat completions 兼容 API 的服务。
+一个以 Go 实现的 Cursor Web 协议兼容服务，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses、tools / function calling、以及 Vision / OCR 预处理。
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-orange.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
