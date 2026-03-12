@@ -184,6 +184,13 @@ func (s *CursorService) buildCursorRequest(request *models.ChatCompletionRequest
 func (s *CursorService) consumeSSE(ctx context.Context, resp *http.Response, output chan interface{}) {
 	defer close(output)
 
+	// Ensure the response body is closed when context is cancelled,
+	// unblocking any pending Read() in the SSE scanner.
+	go func() {
+		<-ctx.Done()
+		resp.Body.Close()
+	}()
+
 	if err := utils.ReadSSEStream(ctx, resp, output); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return

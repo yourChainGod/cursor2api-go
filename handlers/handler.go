@@ -237,17 +237,27 @@ func (h *Handler) streamAnthropic(c *gin.Context, body *compat.AnthropicRequest)
 
 	parser := compat.NewStreamResponseParser(len(body.Tools) > 0, body.Thinking != nil && strings.EqualFold(body.Thinking.Type, "enabled"))
 	var fullText bytes.Buffer
+	var sanitizeBuffer strings.Builder
 	var usage models.Usage
 	blockIndex := 0
 	textBlockOpen := false
 	textBlockIndex := -1
 	toolSeen := false
 
-	emitText := func(text string) {
-		cleanText := sanitizeResponse(text)
-		if len(body.Tools) > 0 && isRefusal(text) {
+	flushSanitized := func(force bool) {
+		raw := sanitizeBuffer.String()
+		if raw == "" {
+			return
+		}
+		// Only flush when we have enough text for reliable pattern matching, or on force
+		if !force && len(raw) < 200 {
+			return
+		}
+		cleanText := sanitizeResponse(raw)
+		if len(body.Tools) > 0 && isRefusal(raw) {
 			cleanText = ""
 		}
+		sanitizeBuffer.Reset()
 		if strings.TrimSpace(cleanText) == "" {
 			return
 		}
@@ -259,7 +269,12 @@ func (h *Handler) streamAnthropic(c *gin.Context, body *compat.AnthropicRequest)
 		}
 		writeAnthropicSSE(c, "content_block_delta", gin.H{"type": "content_block_delta", "index": textBlockIndex, "delta": gin.H{"type": "text_delta", "text": cleanText}})
 	}
+	emitText := func(text string) {
+		sanitizeBuffer.WriteString(text)
+		flushSanitized(false)
+	}
 	closeText := func() {
+		flushSanitized(true)
 		if textBlockOpen {
 			writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": textBlockIndex})
 			textBlockOpen = false
@@ -416,21 +431,35 @@ func (h *Handler) streamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, a
 
 	parser := compat.NewStreamResponseParser(len(body.Tools) > 0, false)
 	var fullText bytes.Buffer
+	var openaiSanitizeBuf strings.Builder
 	var toolSeen bool
 	toolCallIndex := 0
+
+	flushOpenAISanitized := func(force bool) {
+		raw := openaiSanitizeBuf.String()
+		if raw == "" {
+			return
+		}
+		if !force && len(raw) < 200 {
+			return
+		}
+		cleanText := sanitizeResponse(raw)
+		if len(body.Tools) > 0 && isRefusal(raw) {
+			cleanText = ""
+		}
+		openaiSanitizeBuf.Reset()
+		if strings.TrimSpace(cleanText) == "" {
+			return
+		}
+		writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: cleanText}, FinishReason: nil}}})
+	}
 
 	emitSegments := func(segments []compat.ResponseSegment) {
 		for _, seg := range segments {
 			switch seg.Type {
 			case "text":
-				cleanText := sanitizeResponse(seg.Text)
-				if len(body.Tools) > 0 && isRefusal(seg.Text) {
-					cleanText = ""
-				}
-				if strings.TrimSpace(cleanText) == "" {
-					continue
-				}
-				writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: cleanText}, FinishReason: nil}}})
+				openaiSanitizeBuf.WriteString(seg.Text)
+				flushOpenAISanitized(false)
 			case "tool_use":
 				if seg.ToolCall == nil {
 					continue
@@ -456,6 +485,7 @@ func (h *Handler) streamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, a
 			if !ok {
 				parser.Finish()
 				emitSegments(parser.ConsumeEvents())
+				flushOpenAISanitized(true)
 				finishReason := "stop"
 				if toolSeen {
 					finishReason = "tool_calls"

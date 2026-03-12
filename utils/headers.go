@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -66,6 +67,7 @@ var (
 
 // HeaderGenerator 动态 header 生成器
 type HeaderGenerator struct {
+	mu              sync.Mutex
 	profile         BrowserProfile
 	chromeVersion   int
 	rng             *rand.Rand
@@ -128,6 +130,9 @@ func generateUserAgent(profile BrowserProfile) string {
 
 // GetChatHeaders 获取聊天请求的 headers
 func (g *HeaderGenerator) GetChatHeaders() map[string]string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	// 随机选择语言
 	languages := []string{
 		"en-US,en;q=0.9",
@@ -191,6 +196,9 @@ func (g *HeaderGenerator) GetProfile() BrowserProfile {
 
 // Refresh 刷新配置文件（生成新的随机配置）
 func (g *HeaderGenerator) Refresh() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	// 根据当前操作系统选择合适的配置文件
 	var profiles []BrowserProfile
 	switch runtime.GOOS {
