@@ -77,3 +77,28 @@ func TestIsTruncated(t *testing.T) {
 		t.Fatal("expected complete code fence not to be considered truncated")
 	}
 }
+
+func TestTailStringPreservesUTF8Runes(t *testing.T) {
+	input := "abc常量|值|用途"
+	got := tailString(input, 6)
+	if !strings.Contains(got, "用途") {
+		t.Fatalf("expected tail to contain full UTF-8 runes, got %q", got)
+	}
+	if strings.ContainsRune(got, '\ufffd') {
+		t.Fatalf("expected no replacement rune, got %q", got)
+	}
+}
+
+func TestChunkStringPreservesUTF8Runes(t *testing.T) {
+	input := "常量 | 值 | 用途 | 常量 | 值 | 用途"
+	chunks := chunkString(input, 5)
+	joined := strings.Join(chunks, "")
+	if joined != input {
+		t.Fatalf("expected rune-safe chunking to preserve content, got %q", joined)
+	}
+	for _, chunk := range chunks {
+		if strings.ContainsRune(chunk, '\ufffd') {
+			t.Fatalf("unexpected replacement rune in chunk %q", chunk)
+		}
+	}
+}

@@ -16,8 +16,10 @@ var (
 )
 
 const (
-	thinkingStartTag = "<thinking>"
-	thinkingEndTag   = "</thinking>"
+	thinkingStartTag  = "<thinking>"
+	thinkingEndTag    = "</thinking>"
+	toolFenceStartTag = "```json"
+	streamTailRunes   = 24
 )
 
 func HasToolCalls(text string) bool {
@@ -280,6 +282,162 @@ func tolerantRegexParse(input string) (map[string]interface{}, error) {
 	}
 	result["parameters"] = params
 	return result, nil
+}
+
+type StreamResponseParser struct {
+	toolsEnabled    bool
+	thinkingEnabled bool
+	mode            string
+	normalBuffer    string
+	thinkingBuffer  string
+	toolBuffer      string
+	toolInString    bool
+	toolEscaped     bool
+	events          []ResponseSegment
+}
+
+func NewStreamResponseParser(toolsEnabled, thinkingEnabled bool) *StreamResponseParser {
+	return &StreamResponseParser{toolsEnabled: toolsEnabled, thinkingEnabled: thinkingEnabled, mode: "normal", events: make([]ResponseSegment, 0, 8)}
+}
+
+func (p *StreamResponseParser) Feed(delta string) {
+	for _, r := range delta {
+		p.feedRune(r)
+	}
+	if p.mode == "normal" {
+		p.flushNormalPartial(false)
+	}
+}
+
+func (p *StreamResponseParser) Finish() {
+	switch p.mode {
+	case "thinking":
+		if strings.TrimSpace(p.thinkingBuffer) != "" {
+			p.events = append(p.events, ResponseSegment{Type: "thinking", Thinking: strings.TrimSpace(p.thinkingBuffer)})
+		}
+	case "tool":
+		if calls, clean := ParseToolCalls(p.toolBuffer); len(calls) > 0 {
+			if strings.TrimSpace(clean) != "" {
+				p.events = appendTextSegment(p.events, clean)
+			}
+			for _, call := range calls {
+				callCopy := call
+				p.events = append(p.events, ResponseSegment{Type: "tool_use", ToolCall: &callCopy})
+			}
+		} else if p.toolBuffer != "" {
+			p.events = appendTextSegment(p.events, p.toolBuffer)
+		}
+	}
+	p.mode = "normal"
+	p.thinkingBuffer = ""
+	p.toolBuffer = ""
+	p.toolInString = false
+	p.toolEscaped = false
+	p.flushNormalPartial(true)
+}
+
+func (p *StreamResponseParser) ConsumeEvents() []ResponseSegment {
+	pending := p.events
+	p.events = nil
+	return pending
+}
+
+func (p *StreamResponseParser) feedRune(r rune) {
+	switch p.mode {
+	case "thinking":
+		p.thinkingBuffer += string(r)
+		if strings.HasSuffix(p.thinkingBuffer, thinkingEndTag) {
+			content := strings.TrimSpace(strings.TrimSuffix(p.thinkingBuffer, thinkingEndTag))
+			if content != "" {
+				p.events = append(p.events, ResponseSegment{Type: "thinking", Thinking: content})
+			}
+			p.thinkingBuffer = ""
+			p.mode = "normal"
+		}
+		return
+	case "tool":
+		p.toolBuffer += string(r)
+		if p.toolEscaped {
+			p.toolEscaped = false
+			return
+		}
+		if p.toolInString {
+			switch r {
+			case '\\':
+				p.toolEscaped = true
+			case '"':
+				p.toolInString = false
+			}
+			return
+		}
+		if r == '"' {
+			p.toolInString = true
+			return
+		}
+		if strings.HasSuffix(p.toolBuffer, "```") && len([]rune(p.toolBuffer)) > len(toolFenceStartTag)+3 {
+			if calls, clean := ParseToolCalls(p.toolBuffer); len(calls) > 0 {
+				if strings.TrimSpace(clean) != "" {
+					p.events = appendTextSegment(p.events, clean)
+				}
+				for _, call := range calls {
+					callCopy := call
+					p.events = append(p.events, ResponseSegment{Type: "tool_use", ToolCall: &callCopy})
+				}
+			} else {
+				p.events = appendTextSegment(p.events, p.toolBuffer)
+			}
+			p.toolBuffer = ""
+			p.toolInString = false
+			p.toolEscaped = false
+			p.mode = "normal"
+		}
+		return
+	default:
+		p.normalBuffer += string(r)
+		if p.thinkingEnabled && strings.HasSuffix(p.normalBuffer, thinkingStartTag) {
+			prefix := strings.TrimSuffix(p.normalBuffer, thinkingStartTag)
+			if prefix != "" {
+				p.events = appendTextSegment(p.events, prefix)
+			}
+			p.normalBuffer = ""
+			p.mode = "thinking"
+			return
+		}
+		if p.toolsEnabled && strings.HasSuffix(p.normalBuffer, toolFenceStartTag) {
+			prefix := strings.TrimSuffix(p.normalBuffer, toolFenceStartTag)
+			if prefix != "" {
+				p.events = appendTextSegment(p.events, prefix)
+			}
+			p.normalBuffer = ""
+			p.toolBuffer = toolFenceStartTag
+			p.mode = "tool"
+			p.toolInString = false
+			p.toolEscaped = false
+			return
+		}
+	}
+}
+
+func (p *StreamResponseParser) flushNormalPartial(force bool) {
+	if p.normalBuffer == "" {
+		return
+	}
+	runes := []rune(p.normalBuffer)
+	if !force && len(runes) <= streamTailRunes {
+		return
+	}
+	cut := len(runes)
+	if !force {
+		cut -= streamTailRunes
+	}
+	if cut <= 0 {
+		return
+	}
+	text := string(runes[:cut])
+	if text != "" {
+		p.events = appendTextSegment(p.events, text)
+	}
+	p.normalBuffer = string(runes[cut:])
 }
 
 func appendTextSegment(segments []ResponseSegment, text string) []ResponseSegment {

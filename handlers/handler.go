@@ -208,12 +208,6 @@ func (h *Handler) nonStreamAnthropic(c *gin.Context, body *compat.AnthropicReque
 }
 
 func (h *Handler) streamAnthropic(c *gin.Context, body *compat.AnthropicRequest) {
-	result, err := h.executeAnthropicRequest(c.Request.Context(), body)
-	if err != nil {
-		middleware.HandleError(c, err)
-		return
-	}
-
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -230,52 +224,111 @@ func (h *Handler) streamAnthropic(c *gin.Context, body *compat.AnthropicRequest)
 			"model":         body.Model,
 			"stop_reason":   nil,
 			"stop_sequence": nil,
-			"usage": gin.H{
-				"input_tokens":  compat.EstimateAnthropicInputTokens(body),
-				"output_tokens": 0,
-			},
+			"usage":         gin.H{"input_tokens": compat.EstimateAnthropicInputTokens(body), "output_tokens": 0},
 		},
 	})
 
-	content, stopReason := buildAnthropicContentBlocks(body, result.Text)
+	cursorReq := compat.ConvertAnthropicToCursorRequest(body, h.config)
+	chatGenerator, err := h.cursorService.ChatCompletionWithCursorRequest(c.Request.Context(), &cursorReq)
+	if err != nil {
+		writeAnthropicSSE(c, "error", gin.H{"type": "error", "error": gin.H{"type": "api_error", "message": err.Error()}})
+		return
+	}
+
+	parser := compat.NewStreamResponseParser(len(body.Tools) > 0, body.Thinking != nil && strings.EqualFold(body.Thinking.Type, "enabled"))
+	var fullText bytes.Buffer
+	var usage models.Usage
 	blockIndex := 0
-	for _, block := range content {
-		switch block.Type {
-		case "text":
-			writeAnthropicTextBlock(c, blockIndex, block.Text)
+	textBlockOpen := false
+	textBlockIndex := -1
+	toolSeen := false
+
+	emitText := func(text string) {
+		cleanText := sanitizeResponse(text)
+		if len(body.Tools) > 0 && isRefusal(text) {
+			cleanText = ""
+		}
+		if strings.TrimSpace(cleanText) == "" {
+			return
+		}
+		if !textBlockOpen {
+			textBlockIndex = blockIndex
+			writeAnthropicSSE(c, "content_block_start", gin.H{"type": "content_block_start", "index": textBlockIndex, "content_block": gin.H{"type": "text", "text": ""}})
+			textBlockOpen = true
 			blockIndex++
-		case "thinking":
-			writeAnthropicThinkingBlock(c, blockIndex, block.Thinking)
-			blockIndex++
-		case "tool_use":
-			toolID := block.ID
-			if toolID == "" {
-				toolID = "toolu_" + randomID(24)
+		}
+		writeAnthropicSSE(c, "content_block_delta", gin.H{"type": "content_block_delta", "index": textBlockIndex, "delta": gin.H{"type": "text_delta", "text": cleanText}})
+	}
+	closeText := func() {
+		if textBlockOpen {
+			writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": textBlockIndex})
+			textBlockOpen = false
+			textBlockIndex = -1
+		}
+	}
+	emitSegments := func(segments []compat.ResponseSegment) {
+		for _, seg := range segments {
+			switch seg.Type {
+			case "text":
+				emitText(seg.Text)
+			case "thinking":
+				closeText()
+				if strings.TrimSpace(seg.Thinking) != "" {
+					writeAnthropicThinkingBlock(c, blockIndex, seg.Thinking)
+					blockIndex++
+				}
+			case "tool_use":
+				closeText()
+				if seg.ToolCall == nil {
+					continue
+				}
+				toolSeen = true
+				toolID := "toolu_" + randomID(24)
+				writeAnthropicSSE(c, "content_block_start", gin.H{"type": "content_block_start", "index": blockIndex, "content_block": gin.H{"type": "tool_use", "id": toolID, "name": seg.ToolCall.Name, "input": gin.H{}}})
+				argsJSON, _ := json.Marshal(seg.ToolCall.Arguments)
+				for _, chunk := range chunkString(string(argsJSON), 128) {
+					writeAnthropicSSE(c, "content_block_delta", gin.H{"type": "content_block_delta", "index": blockIndex, "delta": gin.H{"type": "input_json_delta", "partial_json": chunk}})
+				}
+				writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": blockIndex})
+				blockIndex++
 			}
-			writeAnthropicSSE(c, "content_block_start", gin.H{
-				"type":          "content_block_start",
-				"index":         blockIndex,
-				"content_block": gin.H{"type": "tool_use", "id": toolID, "name": block.Name, "input": gin.H{}},
-			})
-			argsJSON, _ := json.Marshal(block.Input)
-			for _, chunk := range chunkString(string(argsJSON), 128) {
-				writeAnthropicSSE(c, "content_block_delta", gin.H{
-					"type":  "content_block_delta",
-					"index": blockIndex,
-					"delta": gin.H{"type": "input_json_delta", "partial_json": chunk},
-				})
-			}
-			writeAnthropicSSE(c, "content_block_stop", gin.H{"type": "content_block_stop", "index": blockIndex})
-			blockIndex++
 		}
 	}
 
-	writeAnthropicSSE(c, "message_delta", gin.H{
-		"type":  "message_delta",
-		"delta": gin.H{"stop_reason": stopReason, "stop_sequence": nil},
-		"usage": gin.H{"output_tokens": estimateOutputTokens(result)},
-	})
-	writeAnthropicSSE(c, "message_stop", gin.H{"type": "message_stop"})
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case item, ok := <-chatGenerator:
+			if !ok {
+				parser.Finish()
+				emitSegments(parser.ConsumeEvents())
+				closeText()
+				result := collectedCursorOutput{Text: fullText.String(), Usage: usage}
+				stopReason := "end_turn"
+				if toolSeen {
+					stopReason = "tool_use"
+				} else if len(body.Tools) > 0 && isTruncated(result.Text) {
+					stopReason = "max_tokens"
+				}
+				writeAnthropicSSE(c, "message_delta", gin.H{"type": "message_delta", "delta": gin.H{"stop_reason": stopReason, "stop_sequence": nil}, "usage": gin.H{"output_tokens": estimateOutputTokens(result)}})
+				writeAnthropicSSE(c, "message_stop", gin.H{"type": "message_stop"})
+				return
+			}
+			switch v := item.(type) {
+			case string:
+				fullText.WriteString(v)
+				parser.Feed(v)
+				emitSegments(parser.ConsumeEvents())
+			case models.Usage:
+				usage = v
+			case error:
+				closeText()
+				writeAnthropicSSE(c, "error", gin.H{"type": "error", "error": gin.H{"type": "api_error", "message": v.Error()}})
+				return
+			}
+		}
+	}
 }
 
 func (h *Handler) nonStreamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, anthropicReq *compat.AnthropicRequest) {
@@ -335,12 +388,6 @@ func (h *Handler) nonStreamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest
 }
 
 func (h *Handler) streamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, anthropicReq *compat.AnthropicRequest) {
-	result, err := h.executeAnthropicRequest(c.Request.Context(), anthropicReq)
-	if err != nil {
-		middleware.HandleError(c, err)
-		return
-	}
-
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -356,81 +403,84 @@ func (h *Handler) streamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, a
 		Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Role: "assistant", Content: ""}, FinishReason: nil}},
 	})
 
-	finishReason := "stop"
-	if len(body.Tools) > 0 {
-		toolCalls, cleanText := compat.ParseToolCalls(result.Text)
-		if isRefusal(cleanText) {
-			cleanText = ""
+	cursorReq := compat.ConvertAnthropicToCursorRequest(anthropicReq, h.config)
+	chatGenerator, err := h.cursorService.ChatCompletionWithCursorRequest(c.Request.Context(), &cursorReq)
+	if err != nil {
+		writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: "\n\n[Error: " + err.Error() + "]"}, FinishReason: "stop"}}})
+		_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+		if flusher, ok := c.Writer.(http.Flusher); ok {
+			flusher.Flush()
 		}
-		cleanText = sanitizeResponse(cleanText)
-		if cleanText != "" {
-			writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
-				ID:      id,
-				Object:  "chat.completion.chunk",
-				Created: created,
-				Model:   body.Model,
-				Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: cleanText}, FinishReason: nil}},
-			})
-		}
-		if len(toolCalls) > 0 {
-			finishReason = "tool_calls"
-			for i, tc := range toolCalls {
-				callID := "call_" + randomID(24)
-				writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
-					ID:      id,
-					Object:  "chat.completion.chunk",
-					Created: created,
-					Model:   body.Model,
-					Choices: []compat.OpenAIStreamChoice{{
-						Index:        0,
-						Delta:        compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: i, ID: callID, Type: "function", Function: compat.OpenAIStreamFunctionPayload{Name: tc.Name, Arguments: ""}}}},
-						FinishReason: nil,
-					}},
-				})
-				argsJSON, _ := json.Marshal(tc.Arguments)
-				for _, chunk := range chunkString(string(argsJSON), 128) {
-					writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
-						ID:      id,
-						Object:  "chat.completion.chunk",
-						Created: created,
-						Model:   body.Model,
-						Choices: []compat.OpenAIStreamChoice{{
-							Index:        0,
-							Delta:        compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: i, Function: compat.OpenAIStreamFunctionPayload{Arguments: chunk}}}},
-							FinishReason: nil,
-						}},
-					})
-				}
-			}
-		} else if cleanText == "" {
-			writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
-				ID:      id,
-				Object:  "chat.completion.chunk",
-				Created: created,
-				Model:   body.Model,
-				Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: sanitizeResponse(result.Text)}, FinishReason: nil}},
-			})
-		}
-	} else {
-		writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
-			ID:      id,
-			Object:  "chat.completion.chunk",
-			Created: created,
-			Model:   body.Model,
-			Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: sanitizeResponse(result.Text)}, FinishReason: nil}},
-		})
+		return
 	}
 
-	writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{
-		ID:      id,
-		Object:  "chat.completion.chunk",
-		Created: created,
-		Model:   body.Model,
-		Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{}, FinishReason: finishReason}},
-	})
-	_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
-	if flusher, ok := c.Writer.(http.Flusher); ok {
-		flusher.Flush()
+	parser := compat.NewStreamResponseParser(len(body.Tools) > 0, false)
+	var fullText bytes.Buffer
+	var toolSeen bool
+
+	emitSegments := func(segments []compat.ResponseSegment) {
+		for _, seg := range segments {
+			switch seg.Type {
+			case "text":
+				cleanText := sanitizeResponse(seg.Text)
+				if len(body.Tools) > 0 && isRefusal(seg.Text) {
+					cleanText = ""
+				}
+				if strings.TrimSpace(cleanText) == "" {
+					continue
+				}
+				writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: cleanText}, FinishReason: nil}}})
+			case "tool_use":
+				if seg.ToolCall == nil {
+					continue
+				}
+				toolSeen = true
+				callID := "call_" + randomID(24)
+				writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: 0, ID: callID, Type: "function", Function: compat.OpenAIStreamFunctionPayload{Name: seg.ToolCall.Name, Arguments: ""}}}}, FinishReason: nil}}})
+				argsJSON, _ := json.Marshal(seg.ToolCall.Arguments)
+				for _, chunk := range chunkString(string(argsJSON), 128) {
+					writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{ToolCalls: []compat.OpenAIStreamToolCall{{Index: 0, Function: compat.OpenAIStreamFunctionPayload{Arguments: chunk}}}}, FinishReason: nil}}})
+				}
+			}
+		}
+	}
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case item, ok := <-chatGenerator:
+			if !ok {
+				parser.Finish()
+				emitSegments(parser.ConsumeEvents())
+				finishReason := "stop"
+				if toolSeen {
+					finishReason = "tool_calls"
+				}
+				writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{}, FinishReason: finishReason}}})
+				_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+				if flusher, ok := c.Writer.(http.Flusher); ok {
+					flusher.Flush()
+				}
+				return
+			}
+			switch v := item.(type) {
+			case string:
+				fullText.WriteString(v)
+				parser.Feed(v)
+				emitSegments(parser.ConsumeEvents())
+			case models.Usage:
+				// OpenAI stream finish usage is not emitted progressively here.
+				_ = v
+			case error:
+				writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{Content: "\n\n[Error: " + v.Error() + "]"}, FinishReason: "stop"}}})
+				_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+				if flusher, ok := c.Writer.(http.Flusher); ok {
+					flusher.Flush()
+				}
+				return
+			}
+		}
 	}
 }
 
@@ -621,13 +671,14 @@ func chunkString(value string, size int) []string {
 	if value == "" || size <= 0 {
 		return []string{value}
 	}
-	chunks := make([]string, 0, (len(value)+size-1)/size)
-	for i := 0; i < len(value); i += size {
+	runes := []rune(value)
+	chunks := make([]string, 0, (len(runes)+size-1)/size)
+	for i := 0; i < len(runes); i += size {
 		end := i + size
-		if end > len(value) {
-			end = len(value)
+		if end > len(runes) {
+			end = len(runes)
 		}
-		chunks = append(chunks, value[i:end])
+		chunks = append(chunks, string(runes[i:end]))
 	}
 	return chunks
 }

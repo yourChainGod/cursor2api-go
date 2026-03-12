@@ -490,10 +490,14 @@ func shouldRetryRefusal(text string, hasTools bool) bool {
 }
 
 func tailString(value string, length int) string {
-	if len(value) <= length {
+	if value == "" || length <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= length {
 		return value
 	}
-	return value[len(value)-length:]
+	return string(runes[len(runes)-length:])
 }
 
 func mergeUsage(a, b models.Usage) models.Usage {

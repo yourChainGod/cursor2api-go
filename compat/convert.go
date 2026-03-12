@@ -520,8 +520,8 @@ func extractToolResultNatural(msg AnthropicMessage) string {
 			switch block.Type {
 			case "tool_result":
 				result := extractToolResultText(block.Content)
-				if len(result) > maxToolResultLength {
-					result = result[:maxToolResultLength] + fmt.Sprintf("\n\n... (truncated, %d chars total)", len(result))
+				if runeCount(result) > maxToolResultLength {
+					result = truncateRunes(result, maxToolResultLength) + fmt.Sprintf("\n\n... (truncated, %d chars total)", runeCount(result))
 				}
 				if block.IsError {
 					parts = append(parts, "The action encountered an error:\n"+result)
@@ -544,8 +544,8 @@ func extractToolResultNatural(msg AnthropicMessage) string {
 			switch blockType {
 			case "tool_result":
 				result := extractToolResultText(block["content"])
-				if len(result) > maxToolResultLength {
-					result = result[:maxToolResultLength] + fmt.Sprintf("\n\n... (truncated, %d chars total)", len(result))
+				if runeCount(result) > maxToolResultLength {
+					result = truncateRunes(result, maxToolResultLength) + fmt.Sprintf("\n\n... (truncated, %d chars total)", runeCount(result))
 				}
 				if boolValue(block["is_error"]) {
 					parts = append(parts, "The action encountered an error:\n"+result)
@@ -563,6 +563,21 @@ func extractToolResultNatural(msg AnthropicMessage) string {
 	}
 
 	return strings.Join(parts, "\n\n") + "\n\nBased on the output above, continue with the next appropriate action using the structured format."
+}
+
+func truncateRunes(value string, limit int) string {
+	if limit <= 0 || value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
+}
+
+func runeCount(value string) int {
+	return len([]rune(value))
 }
 
 func extractToolResultText(content interface{}) string {

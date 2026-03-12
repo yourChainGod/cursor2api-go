@@ -162,6 +162,63 @@ func TestConvertAnthropicToCursorRequestThinkingHint(t *testing.T) {
 	}
 }
 
+func TestTruncateRunesPreservesUTF8Runes(t *testing.T) {
+	input := "常量 | 值 | 用途"
+	got := truncateRunes(input, 7)
+	if strings.ContainsRune(got, '\ufffd') {
+		t.Fatalf("unexpected replacement rune in %q", got)
+	}
+}
+
+func TestStreamResponseParserStreamsTextIncrementally(t *testing.T) {
+	p := NewStreamResponseParser(false, false)
+	p.Feed("Hello")
+	if got := p.ConsumeEvents(); len(got) != 0 {
+		t.Fatalf("expected no immediate flush for tiny buffer, got %#v", got)
+	}
+	p.Feed(" world, this should flush incrementally")
+	events := p.ConsumeEvents()
+	if len(events) == 0 || events[0].Type != "text" {
+		t.Fatalf("expected text event, got %#v", events)
+	}
+	p.Finish()
+	events = append(events, p.ConsumeEvents()...)
+	joined := ""
+	for _, ev := range events {
+		if ev.Type == "text" {
+			joined += ev.Text
+		}
+	}
+	if joined != "Hello world, this should flush incrementally" {
+		t.Fatalf("unexpected joined text %q", joined)
+	}
+}
+
+func TestStreamResponseParserParsesThinkingAndToolAcrossFeeds(t *testing.T) {
+	p := NewStreamResponseParser(true, true)
+	p.Feed("Before <thinking>Plan")
+	p.Feed(" carefully</thinking>```json action\n{\n  \"tool\": \"Read\",\n  \"parameters\": {\n    \"file_path\": \"main.go\"\n  }\n}\n```After")
+	p.Finish()
+	events := p.ConsumeEvents()
+	foundThinking := false
+	foundTool := false
+	foundAfter := false
+	for _, ev := range events {
+		if ev.Type == "thinking" && ev.Thinking == "Plan carefully" {
+			foundThinking = true
+		}
+		if ev.Type == "tool_use" && ev.ToolCall != nil && ev.ToolCall.Name == "Read" {
+			foundTool = true
+		}
+		if ev.Type == "text" && strings.Contains(ev.Text, "After") {
+			foundAfter = true
+		}
+	}
+	if !foundThinking || !foundTool || !foundAfter {
+		t.Fatalf("unexpected parser events: %#v", events)
+	}
+}
+
 func containsAll(text string, needles []string) bool {
 	for _, needle := range needles {
 		if !strings.Contains(text, needle) {
