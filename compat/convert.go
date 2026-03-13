@@ -965,6 +965,11 @@ func EstimateAnthropicInputTokens(req *AnthropicRequest) int {
 	for _, msg := range req.Messages {
 		totalChars += len(extractAnthropicMessageText(msg))
 	}
+	// Tool schemas are compressed by compactSchema but still consume context budget.
+	if len(req.Tools) > 0 {
+		totalChars += len(req.Tools) * 200 // ~200 chars per compressed tool signature
+		totalChars += 1000                 // tool use guidelines and behavior instructions
+	}
 	if totalChars <= 0 {
 		return 1
 	}

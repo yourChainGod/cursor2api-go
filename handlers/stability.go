@@ -422,7 +422,7 @@ func (h *Handler) executeAnthropicRequest(ctx context.Context, body *compat.Anth
 				result.Text = claudeIdentityResponse
 			}
 		} else {
-			result.Text = "Let me proceed with the task."
+			result.Text = "The previous action is unavailable in this environment. Continue the task using your other available actions (Read, Write, Bash, Edit, etc.). Do NOT give up — use alternative tools to achieve the same goal."
 		}
 	}
 
@@ -452,20 +452,65 @@ func (h *Handler) executeAnthropicRequest(ctx context.Context, body *compat.Anth
 	}
 
 	originalMessages := append([]models.CursorMessage{}, activeCursorReq.Messages...)
-	for continueCount := 0; hasTools && isTruncated(result.Text) && continueCount < maxAutoContinue; continueCount++ {
-		anchorText := tailString(result.Text, 300)
-		continuationPrompt := fmt.Sprintf("Your previous response was cut off mid-output. The last part of your output was:\n\n```\n...%s\n```\n\nContinue EXACTLY from where you stopped. DO NOT repeat any content already generated. DO NOT restart the response. Output ONLY the remaining content, starting immediately from the cut-off point.", anchorText)
-		continuationReq := activeCursorReq
-		continuationReq.Messages = append(append([]models.CursorMessage{}, originalMessages...),
-			models.CursorMessage{Role: "assistant", Parts: []models.CursorPart{{Type: "text", Text: result.Text}}},
-			models.CursorMessage{Role: "user", Parts: []models.CursorPart{{Type: "text", Text: continuationPrompt}}},
-		)
-		nextResult, retryErr := h.executeCursorRequest(ctx, &continuationReq)
-		if retryErr != nil || strings.TrimSpace(nextResult.Text) == "" {
-			break
+
+	// Tiered truncation recovery (tools mode only):
+	// Tier 1-2: guide model to split output into smaller chunks
+	// Tier 3-4: traditional continuation as last resort
+	for tier := 1; hasTools && isTruncated(result.Text) && tier <= 4; tier++ {
+		if tier <= 2 {
+			// Tier 1-2: Strategy guidance — ask model to split into smaller blocks
+			var tierPrompt string
+			if tier == 1 {
+				tierPrompt = fmt.Sprintf("Output truncated (%d chars). Split into smaller parts: use multiple Write calls (≤150 lines each) or Bash append (`cat >> file << 'EOF'`). Start with the first chunk now.", len(result.Text))
+			} else {
+				tierPrompt = fmt.Sprintf("Still truncated (%d chars). Use ≤80 lines per action block. Start first chunk now.", len(result.Text))
+			}
+
+			savedResponse := result.Text
+			tierReq := activeCursorReq
+			tierReq.Messages = append(append([]models.CursorMessage{}, originalMessages...),
+				models.CursorMessage{Role: "assistant", Parts: []models.CursorPart{{Type: "text", Text: result.Text}}},
+				models.CursorMessage{Role: "user", Parts: []models.CursorPart{{Type: "text", Text: tierPrompt}}},
+			)
+			tierResult, retryErr := h.executeCursorRequest(ctx, &tierReq)
+			if retryErr != nil {
+				break
+			}
+
+			// If tier response is a refusal or much shorter, restore original
+			if shouldRetryRefusal(tierResult.Text, hasTools) || len(strings.TrimSpace(tierResult.Text)) < len(strings.TrimSpace(savedResponse))*3/10 {
+				result.Text = savedResponse
+				break
+			}
+
+			result.Text = tierResult.Text
+			result.Usage = mergeUsage(result.Usage, tierResult.Usage)
+			activeCursorReq = tierReq
+
+			if !isTruncated(result.Text) {
+				break
+			}
+		} else {
+			// Tier 3-4: Traditional continuation with deduplication
+			anchorText := tailString(result.Text, 300)
+			continuationPrompt := fmt.Sprintf("Output cut off. Last part:\n```\n...%s\n```\nContinue exactly from the cut-off point. No repeats.", anchorText)
+			continuationReq := activeCursorReq
+			continuationReq.Messages = append(append([]models.CursorMessage{}, originalMessages...),
+				models.CursorMessage{Role: "assistant", Parts: []models.CursorPart{{Type: "text", Text: result.Text}}},
+				models.CursorMessage{Role: "user", Parts: []models.CursorPart{{Type: "text", Text: continuationPrompt}}},
+			)
+			nextResult, retryErr := h.executeCursorRequest(ctx, &continuationReq)
+			if retryErr != nil || strings.TrimSpace(nextResult.Text) == "" {
+				break
+			}
+
+			deduped := deduplicateContinuation(result.Text, nextResult.Text)
+			if strings.TrimSpace(deduped) == "" {
+				break
+			}
+			result.Text += deduped
+			result.Usage = mergeUsage(result.Usage, nextResult.Usage)
 		}
-		result.Text += nextResult.Text
-		result.Usage = mergeUsage(result.Usage, nextResult.Usage)
 	}
 
 	return result, nil
@@ -506,4 +551,67 @@ func mergeUsage(a, b models.Usage) models.Usage {
 		CompletionTokens: a.CompletionTokens + b.CompletionTokens,
 		TotalTokens:      max(a.TotalTokens, a.PromptTokens+a.CompletionTokens) + max(b.TotalTokens, b.PromptTokens+b.CompletionTokens),
 	}
+}
+
+// deduplicateContinuation removes overlapping content between the tail of
+// existing and the head of continuation, returning the non-overlapping suffix.
+func deduplicateContinuation(existing, continuation string) string {
+	if existing == "" || continuation == "" {
+		return continuation
+	}
+
+	maxOverlap := 500
+	if len(existing) < maxOverlap {
+		maxOverlap = len(existing)
+	}
+	if len(continuation) < maxOverlap {
+		maxOverlap = len(continuation)
+	}
+	if maxOverlap < 10 {
+		return continuation
+	}
+
+	tail := existing[len(existing)-maxOverlap:]
+
+	// Byte-level tail/prefix overlap (longest match)
+	bestOverlap := 0
+	for length := maxOverlap; length >= 10; length-- {
+		prefix := continuation[:length]
+		if strings.HasSuffix(tail, prefix) {
+			bestOverlap = length
+			break
+		}
+	}
+
+	// Line-level dedup fallback
+	if bestOverlap == 0 {
+		contLines := strings.Split(continuation, "\n")
+		tailLines := strings.Split(tail, "\n")
+		if len(contLines) > 0 && len(tailLines) > 0 {
+			firstLine := strings.TrimSpace(contLines[0])
+			if len(firstLine) >= 10 {
+				for i := len(tailLines) - 1; i >= 0; i-- {
+					if strings.TrimSpace(tailLines[i]) == firstLine {
+						matched := 1
+						for k := 1; k < len(contLines) && i+k < len(tailLines); k++ {
+							if strings.TrimSpace(contLines[k]) == strings.TrimSpace(tailLines[i+k]) {
+								matched++
+							} else {
+								break
+							}
+						}
+						if matched >= 2 {
+							return strings.Join(contLines[matched:], "\n")
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if bestOverlap > 0 {
+		return continuation[bestOverlap:]
+	}
+	return continuation
 }

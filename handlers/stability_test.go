@@ -102,3 +102,26 @@ func TestChunkStringPreservesUTF8Runes(t *testing.T) {
 		}
 	}
 }
+
+func TestDeduplicateContinuation(t *testing.T) {
+	cases := []struct {
+		name     string
+		existing string
+		cont     string
+		want     string
+	}{
+		{"no overlap", "hello world", "foo bar", "foo bar"},
+		{"tail overlap", "abcdef1234567890", "1234567890xyz", "xyz"},
+		{"line dedup", "line1\nline2\nline3", "line2\nline3\nline4", "\nline4"},
+		{"empty cont", "hello", "", ""},
+		{"short", "hi", "hi", "hi"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deduplicateContinuation(tc.existing, tc.cont)
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
