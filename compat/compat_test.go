@@ -112,7 +112,7 @@ func TestConvertAnthropicToCursorRequestNoToolsReframesAndCleansHistory(t *testi
 		t.Fatalf("expected assistant refusal history to be cleaned, got %q", assistantText)
 	}
 	userText := cursorReq.Messages[1].Parts[0].Text
-	if !containsAll(userText, []string{"software development workflow", "Original system prompt", "Injected system prompt", "Explain TCP keepalive."}) {
+	if !containsAll(userText, []string{"versatile AI assistant", "Original system prompt", "Injected system prompt", "Explain TCP keepalive."}) {
 		t.Fatalf("expected reframed user prompt with system text, got %q", userText)
 	}
 }
