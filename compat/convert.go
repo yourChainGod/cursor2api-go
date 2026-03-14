@@ -263,7 +263,13 @@ func ConvertAnthropicToCursorRequest(req *AnthropicRequest, cfg *config.Config) 
 	// the estimated byte size exceeds cfg.MaxInputLength characters.
 	// Always preserve: the first 2 messages (system/tool-instructions + few-shot)
 	// and the last 2 messages (most recent user turn + any immediately prior assistant).
-	messages = trimMessagesToLimit(messages, cfg.MaxInputLength)
+	// Apply a 0.7 factor: JSON serialization overhead (field names, tool schemas,
+	// structure) typically adds 30-40% on top of raw message text.
+	trimLimit := (cfg.MaxInputLength * 7) / 10
+	if trimLimit <= 0 {
+		trimLimit = 140000
+	}
+	messages = trimMessagesToLimit(messages, trimLimit)
 
 	return models.CursorRequest{
 		Context:  []interface{}{},
