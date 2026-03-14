@@ -321,11 +321,20 @@ func trimMessagesToLimit(messages []models.CursorMessage, limitChars int) []mode
 	middle := make([]models.CursorMessage, len(messages)-protectedHead-protectedTail)
 	copy(middle, messages[protectedHead:len(messages)-protectedTail])
 
-	// Step 1: truncate old middle messages
+	// Step 1: compress old middle messages safely.
+	// Do NOT inject partial code like "...[truncated]" into historical content,
+	// otherwise the model may copy that literal marker into new tool arguments.
 	for i := range middle {
 		for j := range middle[i].Parts {
 			if len(middle[i].Parts[j].Text) > truncateOldTo {
-				middle[i].Parts[j].Text = middle[i].Parts[j].Text[:truncateOldTo] + "...[truncated]"
+				switch middle[i].Role {
+				case "assistant":
+					middle[i].Parts[j].Text = "[Earlier assistant output omitted for size. Preserve current task and rely on recent context.]"
+				case "user":
+					middle[i].Parts[j].Text = "[Earlier user message omitted for size. Preserve the current task and recent context.]"
+				default:
+					middle[i].Parts[j].Text = "[Earlier context omitted for size.]"
+				}
 			}
 		}
 	}
