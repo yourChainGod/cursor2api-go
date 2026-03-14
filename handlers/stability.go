@@ -93,7 +93,8 @@ var (
 	actionOpenRe           = regexp.MustCompile("```json\\s+action")
 	actionBlockRe          = regexp.MustCompile("(?s)```json\\s+action[\\s\\S]*?```")
 	lineStartFenceRe       = regexp.MustCompile(`(?m)^` + "```")
-	trailingContinuationRe = regexp.MustCompile(`[{\[\\,:"]\s*$`)
+	trailingContinuationRe = regexp.MustCompile(`[,;:\[{(]\s*$`)
+	trailingBackslashNRe   = regexp.MustCompile(`(?s)\\n?\s*$`)
 )
 
 // Pre-compiled sanitize tail patterns.
@@ -410,6 +411,11 @@ func isTruncated(text string) bool {
 
 	// Ends with continuation punctuation
 	if trailingContinuationRe.MatchString(trimmed) {
+		return true
+	}
+
+	// Long response ending with bare newline (likely cut mid-paragraph)
+	if len(trimmed) > 500 && trailingBackslashNRe.MatchString(trimmed) {
 		return true
 	}
 
