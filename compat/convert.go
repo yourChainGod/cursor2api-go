@@ -278,41 +278,55 @@ func ConvertAnthropicToCursorRequest(req *AnthropicRequest, cfg *config.Config) 
 // payload size exceeds limitChars. The first protectedHead messages (system
 // prompt / tool instructions / few-shot) and the last protectedTail messages
 // are always kept.
+// Strategy (mirrors 7836246/cursor2api):
+//  1. Keep the last 6 messages fully intact.
+//  2. Truncate text of older middle messages to 500 chars each.
+//  3. If still over limit, drop oldest middle messages entirely.
 func trimMessagesToLimit(messages []models.CursorMessage, limitChars int) []models.CursorMessage {
 	if limitChars <= 0 || len(messages) == 0 {
 		return messages
 	}
 
 	// Estimate total size
-	total := 0
-	for _, m := range messages {
-		for _, p := range m.Parts {
-			total += len(p.Text)
+	estSize := func(msgs []models.CursorMessage) int {
+		total := 0
+		for _, m := range msgs {
+			for _, p := range m.Parts {
+				total += len(p.Text)
+			}
 		}
+		return total
 	}
-	if total <= limitChars {
+
+	if estSize(messages) <= limitChars {
 		return messages
 	}
 
-	const protectedHead = 2 // system+fewshot (tools) or reframing (no-tools)
-	const protectedTail = 2 // last user turn + preceding assistant
+	const protectedHead = 2   // system+fewshot or reframing
+	const protectedTail = 6   // keep last 6 messages fully intact
+	const truncateOldTo = 500 // truncate old middle messages to this many chars
 
 	if len(messages) <= protectedHead+protectedTail {
-		return messages // too short to trim
+		return messages
 	}
 
-	// Drop messages from the middle (oldest history) until we fit
 	head := messages[:protectedHead]
 	tail := messages[len(messages)-protectedTail:]
-	middle := append([]models.CursorMessage{}, messages[protectedHead:len(messages)-protectedTail]...)
+	middle := make([]models.CursorMessage, len(messages)-protectedHead-protectedTail)
+	copy(middle, messages[protectedHead:len(messages)-protectedTail])
 
-	for total > limitChars && len(middle) > 0 {
-		// Remove oldest from middle
-		dropped := middle[0]
-		middle = middle[1:]
-		for _, p := range dropped.Parts {
-			total -= len(p.Text)
+	// Step 1: truncate old middle messages
+	for i := range middle {
+		for j := range middle[i].Parts {
+			if len(middle[i].Parts[j].Text) > truncateOldTo {
+				middle[i].Parts[j].Text = middle[i].Parts[j].Text[:truncateOldTo] + "...[truncated]"
+			}
 		}
+	}
+
+	// Step 2: drop oldest middle messages until we fit
+	for estSize(head)+estSize(middle)+estSize(tail) > limitChars && len(middle) > 0 {
+		middle = middle[1:]
 	}
 
 	result := make([]models.CursorMessage, 0, protectedHead+len(middle)+protectedTail)
