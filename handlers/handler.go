@@ -695,7 +695,11 @@ func buildAnthropicContentBlocks(body *compat.AnthropicRequest, text string) ([]
 		stopReason = "tool_use"
 	}
 	if len(content) == 0 {
-		content = append(content, compat.AnthropicContentBlock{Type: "text", Text: sanitizeResponse(text)})
+		fallback := sanitizeResponse(text)
+		if strings.TrimSpace(fallback) == "" {
+			fallback = text // preserve original if sanitize ate everything
+		}
+		content = append(content, compat.AnthropicContentBlock{Type: "text", Text: fallback})
 	}
 	return content, stopReason
 }

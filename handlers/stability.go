@@ -207,9 +207,6 @@ func sanitizeResponse(text string) string {
 	result = warningRe.ReplaceAllString(result, "")
 
 	result = strings.TrimSpace(result)
-	if result == "" {
-		return "I am Claude, an AI assistant by Anthropic. How can I help?"
-	}
 	return result
 }
 
