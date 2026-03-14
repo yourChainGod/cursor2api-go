@@ -324,7 +324,33 @@ func (h *Handler) streamAnthropic(c *gin.Context, body *compat.AnthropicRequest)
 				if toolSeen {
 					stopReason = "tool_use"
 				} else if len(body.Tools) > 0 && isTruncated(result.Text) {
-					stopReason = "max_tokens"
+					// Stream truncation recovery: attempt up to 2 continuation passes
+					for contPass := 0; contPass < 2 && isTruncated(result.Text); contPass++ {
+						savedText := result.Text
+						continueReq := compat.ConvertAnthropicToCursorRequest(body, h.config)
+						continueReq.Messages = append(continueReq.Messages,
+							models.CursorMessage{Role: "assistant", Parts: []models.CursorPart{{Type: "text", Text: result.Text}}},
+							models.CursorMessage{Role: "user", Parts: []models.CursorPart{{Type: "text", Text: "Your response was cut off. Continue exactly from where you left off, starting with the next character."}}},
+						)
+						contGen, contErr := h.cursorService.ChatCompletionWithCursorRequest(c.Request.Context(), &continueReq)
+						if contErr != nil {
+							break
+						}
+						var contBuf strings.Builder
+						for ci := range contGen {
+							if s, ok := ci.(string); ok {
+								contBuf.WriteString(s)
+							}
+						}
+						deduped := deduplicateContinuation(savedText, contBuf.String())
+						if strings.TrimSpace(deduped) == "" {
+							break
+						}
+						// emit the continuation chunk to the already-open stream
+						emitText(deduped)
+						result.Text += deduped
+					}
+					stopReason = "end_turn"
 				}
 				writeAnthropicSSE(c, "message_delta", gin.H{"type": "message_delta", "delta": gin.H{"stop_reason": stopReason, "stop_sequence": nil}, "usage": gin.H{"output_tokens": estimateOutputTokens(result)}})
 				writeAnthropicSSE(c, "message_stop", gin.H{"type": "message_stop"})
