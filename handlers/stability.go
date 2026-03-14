@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -536,6 +538,18 @@ func (h *Handler) executeAnthropicRequest(ctx context.Context, body *compat.Anth
 		}
 	}
 
+	if logrus.IsLevelEnabled(logrus.DebugLevel) {
+		preview := result.Text
+		if len(preview) > 300 {
+			preview = preview[:300]
+		}
+		logrus.WithFields(logrus.Fields{
+			"text_len":   len(result.Text),
+			"truncated":  isTruncated(result.Text),
+			"tool_calls": len(toolCalls),
+			"preview":    strings.ReplaceAll(preview, "\n", "↵"),
+		}).Debug("executeAnthropicRequest result")
+	}
 	return result, nil
 }
 
