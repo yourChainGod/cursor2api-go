@@ -2,18 +2,43 @@
 
 [English](README_EN.md) | 简体中文
 
-一个以 Go 实现的 Cursor Web 协议兼容服务，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses、tools / function calling、Anthropic thinking 模式、以及 Vision / OCR 预处理。
+一个以 Go 实现的 Cursor Web 协议兼容服务，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses、tools / function calling、Anthropic thinking 模式、以及 Vision API 预处理。
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-orange.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
 
+## 🧬 项目来源
+
+本项目基于以下开源项目改造而来，在此致谢：
+
+| 项目 | 贡献 |
+|---|---|
+| [libaxuan/cursor2api-go](https://github.com/libaxuan/cursor2api-go) | 主要基础代码，Go 实现的 Cursor Web 协议兼容层 |
+| [7836246/cursor2api](https://github.com/7836246/cursor2api) | 借鉴：阶梯式截断恢复、续写去重、工具模式拒绝引导文本、Token 估算优化 |
+| [510myRday/Cursor-Toolbox](https://github.com/510myRday/Cursor-Toolbox) | 借鉴：角色扩展注入反拒绝策略 |
+| [highkay/cursor2api-go](https://github.com/highkay/cursor2api-go) | 参考：reasoning_content 暴露方案 |
+
+## 🆕 相较上游的改进
+
+- ✅ **真流式输出**：改造 `streamAnthropic` / `streamOpenAI`，从上游逐帧转发，不再先攒完整响应再发
+- ✅ **增量流式解析器**：新增 `StreamResponseParser`，实时解析 thinking / tool 块
+- ✅ **UTF-8 安全切片**：修复所有按字节切 UTF-8 字符串导致的乱码问题
+- ✅ **阶梯式截断恢复**：引导模型分块写入，降级才用传统续写
+- ✅ **续写智能去重**：拼接时自动检测并去除重复段落
+- ✅ **并发安全**：HeaderGenerator 加 sync.Mutex，防止并发 panic
+- ✅ **SSE goroutine 泄漏修复**：ctx cancel 时主动关闭 resp.Body
+- ✅ **缓冲式流式 sanitize**：攒 200 字符再做正则清洗，防止碎片误判
+- ✅ **去掉本地 OCR**：移除 tesseract/gosseract 依赖，仅保留外部 Vision API 模式
+- ✅ **自动生成配置**：首次启动若无配置文件，自动生成含 `sk-` 随机密钥的 `config.yaml`
+- ✅ **启动日志显示完整密钥**：方便复制使用
+
 ## ✨ 特性
 
-- 🔄 **API 兼容**: 兼容基础 OpenAI chat completions 接口
-- ⚡ **高性能**: 低延迟响应
-- 🔐 **安全认证**: 支持 API Key 认证
-- 🌐 **多模型支持**: 支持多种 AI 模型
-- 🛡️ **错误处理**: 完善的错误处理机制
+- 🔄 **API 兼容**: 兼容 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses 接口
+- ⚡ **真流式输出**: 上游逐帧转发，首字延迟大幅降低
+- 🔐 **安全认证**: 支持 API Key 认证，首次启动自动生成
+- 🌐 **多模型支持**: 支持多种 Claude 模型名映射
+- 🛡️ **反拒绝策略**: 多层次拒绝检测、重试、响应清洗
 - 📊 **健康检查**: 内置健康检查接口
 
 ## ✨ 功能特性
@@ -21,13 +46,15 @@
 - ✅ 兼容 OpenAI Chat Completions
 - ✅ 兼容 Anthropic Messages API（`/v1/messages`）
 - ✅ 兼容 OpenAI Responses API（`/v1/responses`，适配 Cursor IDE Agent 模式）
-- ✅ 支持流式和非流式响应
-- ✅ 支持 Anthropic thinking 模式（`thinking` → `<thinking>` 解析与 streaming block 输出）
+- ✅ 支持流式和非流式响应（真流式，非缓冲后发送）
+- ✅ 支持 Anthropic thinking 模式（`thinking` → `<thinking>` 增量解析与 streaming block 输出）
 - ✅ 支持 tools / function calling 与工具调用解析
 - ✅ 内置拒绝拦截、响应清洗、tool_choice=any 兜底重试
 - ✅ 支持身份探针拦截与模拟 Claude 响应
-- ✅ 支持截断检测与工具响应自动续写
+- ✅ 阶梯式截断恢复与续写智能去重
 - ✅ 自动处理 Cursor Web 认证
+- ✅ 首次启动自动生成 `config.yaml`（含随机 `sk-` API Key）
+- ✅ 支持外部 Vision API 图片预处理
 - ✅ 简洁的 Web 界面
 
 ## 🤖 支持的模型
@@ -38,26 +65,38 @@
 
 ### 环境要求
 
-- Go 1.24+
-- 本地 OCR 模式下需要安装 Tesseract 运行库（如 `libtesseract-dev`、`libleptonica-dev`、`tesseract-ocr-eng`、`tesseract-ocr-chi-sim`）
+- Go 1.24+（从源码编译时需要）
+- 或直接下载 [Release 预编译二进制](https://github.com/yourChainGod/cursor2api-go/releases)
 
-### 本地运行方式
+### 方法一：直接使用预编译二进制（推荐）
 
-#### 方法一：手动编译运行（推荐）
+从 [Releases](https://github.com/yourChainGod/cursor2api-go/releases) 下载对应平台二进制：
+
+| 平台 | 文件名 |
+|---|---|
+| Linux x86_64 | `cursor2api-linux-amd64` |
+| Windows x86_64 | `cursor2api-windows-amd64.exe` |
+| macOS Apple Silicon | `cursor2api-darwin-arm64` |
+
+首次运行会自动生成 `config.yaml`，包含随机生成的 `sk-` API Key，直接可用。
+
+### 方法二：手动编译运行
 
 ```bash
 # 克隆项目
-git clone https://github.com/libaxuan/cursor2api-go.git
+git clone https://github.com/yourChainGod/cursor2api-go.git
 cd cursor2api-go
-
-# 可选：先复制环境变量模板
-cp .env.example .env
 
 # 安装 Go 依赖
 go mod tidy
 
-# 如需本地 OCR，还需要安装 Tesseract 运行库（Ubuntu/Debian）
-sudo apt-get install -y libtesseract-dev libleptonica-dev tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
+# 编译
+go build -o cursor2api-go .
+
+# 运行（首次运行自动生成 config.yaml）
+./cursor2api-go
+```
+
 
 # 编译
 go build -o cursor2api-go
