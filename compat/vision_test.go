@@ -1,12 +1,9 @@
 package compat
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,11 +12,9 @@ import (
 
 func TestApplyVisionInterceptorWithAPI(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&payload)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{
-				"message": map[string]any{"content": "OCR extracted: hello from image"},
+				"message": map[string]any{"content": "A screenshot showing code editor"},
 			}},
 		})
 	}))
@@ -35,47 +30,22 @@ func TestApplyVisionInterceptorWithAPI(t *testing.T) {
 	}}
 
 	ApplyVisionInterceptor(messages, cfg)
-	blocks, ok := messages[0].Content.([]AnthropicContentBlock)
+	text, ok := messages[0].Content.(string)
 	if !ok {
-		t.Fatalf("expected content to become []AnthropicContentBlock, got %T", messages[0].Content)
+		t.Fatalf("expected content to become string after vision, got %T", messages[0].Content)
 	}
-	if len(blocks) != 2 {
-		t.Fatalf("expected 2 blocks after vision processing, got %d", len(blocks))
+	if !strings.Contains(text, "A screenshot showing code editor") {
+		t.Fatalf("expected vision description in output, got %q", text)
 	}
-	if blocks[0].Type != "text" || blocks[0].Text != "please inspect" {
-		t.Fatalf("expected original text block to remain, got %#v", blocks[0])
-	}
-	if blocks[1].Type != "text" || !strings.Contains(blocks[1].Text, "OCR extracted: hello from image") {
-		t.Fatalf("expected OCR description block, got %#v", blocks[1])
+	if !strings.Contains(text, "please inspect") {
+		t.Fatalf("expected original text preserved, got %q", text)
 	}
 }
 
-func TestProcessWithLocalOCR(t *testing.T) {
-	cfg := &config.Config{Vision: config.Vision{Enabled: true, Mode: "ocr", Languages: "eng"}}
-	fixturePath := filepath.Join("testdata", "hello_ocr.png")
-	imageBytes, err := os.ReadFile(fixturePath)
-	if err != nil {
-		t.Fatalf("failed to read OCR fixture: %v", err)
-	}
-	images := []AnthropicContentBlock{{
-		Type:   "image",
-		Source: &AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: base64.StdEncoding.EncodeToString(imageBytes)},
-	}}
-
-	text, err := processWithLocalOCR(images, cfg)
-	if err != nil {
-		t.Fatalf("expected local OCR to succeed, got error: %v", err)
-	}
-	upper := strings.ToUpper(strings.ReplaceAll(text, " ", ""))
-	if !strings.Contains(upper, "HELLO") {
-		t.Fatalf("expected OCR output to contain HELLO, got %q", text)
-	}
-}
-
-func TestCheckLocalOCR(t *testing.T) {
+func TestCheckLocalOCRNoOp(t *testing.T) {
 	cfg := &config.Config{Vision: config.Vision{Enabled: true, Mode: "ocr", Languages: "eng"}}
 	if err := CheckLocalOCR(cfg); err != nil {
-		t.Fatalf("expected local OCR self-check to pass, got %v", err)
+		t.Fatalf("CheckLocalOCR should be no-op now, got %v", err)
 	}
 }
 

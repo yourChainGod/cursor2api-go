@@ -109,7 +109,7 @@ fingerprint:
   user_agent: YAML Agent
 vision:
   enabled: false
-  mode: ocr
+  mode: api
   languages: eng,chi_sim
   model: gpt-4o-mini
 `
@@ -168,8 +168,8 @@ vision:
 	if config.Vision.Enabled {
 		t.Errorf("Vision.Enabled = %v, want false when explicitly disabled", config.Vision.Enabled)
 	}
-	if config.Vision.Mode != "ocr" {
-		t.Errorf("Vision.Mode = %v, want ocr", config.Vision.Mode)
+	if config.Vision.Mode != "api" {
+		t.Errorf("Vision.Mode = %v, want api", config.Vision.Mode)
 	}
 	if config.Vision.Languages != "eng,chi_sim" {
 		t.Errorf("Vision.Languages = %v, want eng,chi_sim", config.Vision.Languages)
