@@ -129,7 +129,7 @@ max_input_length: 200000
 		logrus.Warnf("Failed to write default config.yaml: %v", err)
 		return
 	}
-	logrus.Infof("Generated default config.yaml with API key: %s", key[:12]+"****")
+	logrus.Infof("Generated default config.yaml with API key: %s", key)
 }
 
 // LoadConfig 加载配置

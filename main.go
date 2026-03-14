@@ -139,7 +139,7 @@ func printStartupBanner(cfg *config.Config) {
 	fmt.Printf("🚀 服务地址:  http://localhost:%d\n", cfg.Port)
 	fmt.Printf("📚 API 文档:  http://localhost:%d/\n", cfg.Port)
 	fmt.Printf("💊 健康检查:  http://localhost:%d/health\n", cfg.Port)
-	fmt.Printf("🔑 API 密钥:  %s\n", maskAPIKey(cfg.APIKey))
+	fmt.Printf("🔑 API 密钥:  %s\n", cfg.APIKey)
 
 	modelList := cfg.GetModels()
 	fmt.Printf("\n🤖 支持模型 (%d 个):\n", len(modelList))
