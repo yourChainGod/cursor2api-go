@@ -64,7 +64,7 @@ ${COMMITS}
 | Windows x86_64 | \`cursor2api-windows-amd64.exe\` |
 | macOS Apple Silicon | \`cursor2api-darwin-arm64\` |
 
-首次运行自动生成 \`config.yaml\`，包含随机 API Key。"
+首次运行自动生成 \`config.yaml\`，包含随机 API Key，无需手动配置。"
 
 # ── 6. 发布 GitHub Release ───────────────────────────────────
 echo "[deploy] creating GitHub release $VERSION..."
