@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -144,9 +145,31 @@ func ParseToolCalls(responseText string) ([]ParsedToolCall, string) {
 		remove = append(remove, span{start: blockStart, end: endPos})
 	}
 
+	// Sort and merge overlapping spans to prevent slice-bounds panic when
+	// a tool argument contains nested code fences.
+	if len(remove) > 1 {
+		sort.Slice(remove, func(i, j int) bool { return remove[i].start < remove[j].start })
+		mergedSpans := remove[:1]
+		for _, s := range remove[1:] {
+			last := &mergedSpans[len(mergedSpans)-1]
+			if s.start <= last.end {
+				if s.end > last.end {
+					last.end = s.end
+				}
+			} else {
+				mergedSpans = append(mergedSpans, s)
+			}
+		}
+		remove = mergedSpans
+	}
+
 	cleanText := responseText
 	for i := len(remove) - 1; i >= 0; i-- {
-		cleanText = cleanText[:remove[i].start] + cleanText[remove[i].end:]
+		s := remove[i]
+		if s.start < 0 || s.end > len(cleanText) || s.start > s.end {
+			continue
+		}
+		cleanText = cleanText[:s.start] + cleanText[s.end:]
 	}
 
 	return toolCalls, strings.TrimSpace(cleanText)
