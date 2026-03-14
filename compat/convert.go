@@ -173,7 +173,7 @@ func ConvertAnthropicToCursorRequest(req *AnthropicRequest, cfg *config.Config) 
 
 	messages := make([]models.CursorMessage, 0)
 	hasTools := len(req.Tools) > 0
-	thinkingEnabled := req.Thinking != nil && strings.EqualFold(req.Thinking.Type, "enabled")
+	thinkingEnabled := req.Thinking != nil && strings.EqualFold(req.Thinking.Type, "enabled") && len(req.Tools) == 0 // suppress thinking in tools mode
 	lastUserIndex := lastUserMessageIndex(req.Messages)
 	systemText := extractSystemText(req.System)
 	if strings.TrimSpace(cfg.SystemPromptInject) != "" {

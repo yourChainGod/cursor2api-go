@@ -86,8 +86,12 @@ var compiledCleanupPatterns []*regexp.Regexp
 
 // Pre-compiled patterns used in isTruncated.
 var (
-	truncOpenTagRe  = regexp.MustCompile(`(?m)^<[a-zA-Z]`)
-	truncCloseTagRe = regexp.MustCompile(`(?m)^</[a-zA-Z]`)
+	truncOpenTagRe         = regexp.MustCompile(`(?m)^<[a-zA-Z]`)
+	truncCloseTagRe        = regexp.MustCompile(`(?m)^</[a-zA-Z]`)
+	actionOpenRe           = regexp.MustCompile("```json\\s+action")
+	actionBlockRe          = regexp.MustCompile("(?s)```json\\s+action[\\s\\S]*?```")
+	lineStartFenceRe       = regexp.MustCompile(`(?m)^` + "```")
+	trailingContinuationRe = regexp.MustCompile(`[{\[\\,:"]\s*$`)
 )
 
 // Pre-compiled sanitize tail patterns.
@@ -368,28 +372,45 @@ func deepCloneAnthropicRequest(body *compat.AnthropicRequest) *compat.AnthropicR
 }
 
 func isTruncated(text string) bool {
-	trimmed := strings.TrimSpace(text)
+	trimmed := strings.TrimRight(text, " \t\n\r")
 	if trimmed == "" {
 		return false
 	}
-	if strings.Count(trimmed, "```")%2 != 0 {
+
+	// ★ Priority: detect unclosed ```json action blocks (most reliable signal)
+	// Only count line-start ``` to avoid matching backticks inside JSON string values.
+	actionOpens := strings.Count(trimmed, "```json action") + strings.Count(trimmed, "```json\n action") // handle both formats
+	// simpler: use the pattern as written in deltas
+	actionOpens = len(actionOpenRe.FindAllString(trimmed, -1))
+	if actionOpens > 0 {
+		// count fully closed action blocks
+		closedBlocks := len(actionBlockRe.FindAllString(trimmed, -1))
+		if actionOpens > closedBlocks {
+			return true
+		}
+		// all action blocks are closed — not truncated even if text ends abruptly
+		return false
+	}
+
+	// No tool calls: use generic heuristics for plain text / code responses
+	// Only count line-start ``` to avoid false positives from JSON values
+	lineStartFences := len(lineStartFenceRe.FindAllString(trimmed, -1))
+	if lineStartFences%2 != 0 {
 		return true
 	}
-	if strings.Count(trimmed, "```json action") > 0 && strings.Count(trimmed, "```") < strings.Count(trimmed, "```json action")*2 {
-		return true
-	}
+
+	// Unclosed XML/HTML tags
 	openTags := truncOpenTagRe.FindAllStringIndex(trimmed, -1)
 	closeTags := truncCloseTagRe.FindAllStringIndex(trimmed, -1)
-	if len(openTags) > len(closeTags) {
+	if len(openTags) > len(closeTags)+1 {
 		return true
 	}
-	last := trimmed[len(trimmed)-1]
-	if last == '"' || last == '\\' {
+
+	// Ends with continuation punctuation
+	if trailingContinuationRe.MatchString(trimmed) {
 		return true
 	}
-	if last == '{' || last == '[' || last == ':' || last == ',' {
-		return true
-	}
+
 	return false
 }
 
@@ -453,7 +474,12 @@ func (h *Handler) executeAnthropicRequest(ctx context.Context, body *compat.Anth
 	// Tiered truncation recovery (tools mode only):
 	// Tier 1-2: guide model to split output into smaller chunks
 	// Tier 3-4: traditional continuation as last resort
-	for tier := 1; hasTools && isTruncated(result.Text) && tier <= 4; tier++ {
+	// Skip tier loop entirely if the response already contains a complete tool call.
+	hasCompleteTool := func(text string) bool {
+		calls, _ := compat.ParseToolCalls(text)
+		return len(calls) > 0
+	}
+	for tier := 1; hasTools && isTruncated(result.Text) && !hasCompleteTool(result.Text) && tier <= 4; tier++ {
 		if tier <= 2 {
 			// Tier 1-2: Strategy guidance — ask model to split into smaller blocks
 			var tierPrompt string
