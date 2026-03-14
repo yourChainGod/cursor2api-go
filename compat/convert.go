@@ -259,6 +259,12 @@ func ConvertAnthropicToCursorRequest(req *AnthropicRequest, cfg *config.Config) 
 		requestedModel = firstModel(cfg)
 	}
 
+	// Hard-cap the total payload size: drop the oldest history messages when
+	// the estimated byte size exceeds cfg.MaxInputLength characters.
+	// Always preserve: the first 2 messages (system/tool-instructions + few-shot)
+	// and the last 2 messages (most recent user turn + any immediately prior assistant).
+	messages = trimMessagesToLimit(messages, cfg.MaxInputLength)
+
 	return models.CursorRequest{
 		Context:  []interface{}{},
 		Model:    models.ResolveCursorModel(requestedModel, firstModel(cfg)),
@@ -266,6 +272,54 @@ func ConvertAnthropicToCursorRequest(req *AnthropicRequest, cfg *config.Config) 
 		Messages: messages,
 		Trigger:  "submit-message",
 	}
+}
+
+// trimMessagesToLimit drops the oldest middle messages when the estimated
+// payload size exceeds limitChars. The first protectedHead messages (system
+// prompt / tool instructions / few-shot) and the last protectedTail messages
+// are always kept.
+func trimMessagesToLimit(messages []models.CursorMessage, limitChars int) []models.CursorMessage {
+	if limitChars <= 0 || len(messages) == 0 {
+		return messages
+	}
+
+	// Estimate total size
+	total := 0
+	for _, m := range messages {
+		for _, p := range m.Parts {
+			total += len(p.Text)
+		}
+	}
+	if total <= limitChars {
+		return messages
+	}
+
+	const protectedHead = 2 // system+fewshot (tools) or reframing (no-tools)
+	const protectedTail = 2 // last user turn + preceding assistant
+
+	if len(messages) <= protectedHead+protectedTail {
+		return messages // too short to trim
+	}
+
+	// Drop messages from the middle (oldest history) until we fit
+	head := messages[:protectedHead]
+	tail := messages[len(messages)-protectedTail:]
+	middle := append([]models.CursorMessage{}, messages[protectedHead:len(messages)-protectedTail]...)
+
+	for total > limitChars && len(middle) > 0 {
+		// Remove oldest from middle
+		dropped := middle[0]
+		middle = middle[1:]
+		for _, p := range dropped.Parts {
+			total -= len(p.Text)
+		}
+	}
+
+	result := make([]models.CursorMessage, 0, protectedHead+len(middle)+protectedTail)
+	result = append(result, head...)
+	result = append(result, middle...)
+	result = append(result, tail...)
+	return result
 }
 
 func buildToolInstructions(tools []AnthropicTool, hasCommunicationTool bool, toolChoice *AnthropicToolChoice) string {
