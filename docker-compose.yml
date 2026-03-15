@@ -1,0 +1,28 @@
+services:
+  cursor2api:
+    build: .
+    container_name: cursor2api-go
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8002}:8002"
+    environment:
+      - PORT=8002
+      - API_KEY=${API_KEY:-}
+      - MODELS=${MODELS:-claude-sonnet-4.6}
+      - TIMEOUT=${TIMEOUT:-120}
+      - MAX_INPUT_LENGTH=${MAX_INPUT_LENGTH:-200000}
+      - DEBUG=${DEBUG:-false}
+      - PROXY=${PROXY:-}
+      - SYSTEM_PROMPT_INJECT=${SYSTEM_PROMPT_INJECT:-}
+      - VISION_ENABLED=${VISION_ENABLED:-false}
+      - VISION_MODE=${VISION_MODE:-api}
+      - VISION_BASE_URL=${VISION_BASE_URL:-}
+      - VISION_API_KEY=${VISION_API_KEY:-}
+      - VISION_MODEL=${VISION_MODEL:-gpt-4o-mini}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

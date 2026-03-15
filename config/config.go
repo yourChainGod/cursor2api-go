@@ -46,6 +46,7 @@ type Config struct {
 	SystemPromptInject string `json:"system_prompt_inject"`
 	Timeout            int    `json:"timeout"`
 	MaxInputLength     int    `json:"max_input_length"`
+	EnableThinking     bool   `json:"enable_thinking"`
 
 	// 网络配置
 	Proxy string `json:"proxy"`
@@ -79,6 +80,7 @@ type yamlConfig struct {
 	SystemPromptInject string `yaml:"system_prompt_inject"`
 	Timeout            int    `yaml:"timeout"`
 	MaxInputLength     int    `yaml:"max_input_length"`
+	EnableThinking     bool   `yaml:"enable_thinking"`
 	Proxy              string `yaml:"proxy"`
 	Fingerprint        struct {
 		UserAgent string `yaml:"user_agent"`
@@ -244,6 +246,9 @@ func applyYAMLConfig(config *Config) {
 		if strings.TrimSpace(yc.Proxy) != "" {
 			config.Proxy = yc.Proxy
 		}
+		if yc.EnableThinking {
+			config.EnableThinking = true
+		}
 		if strings.TrimSpace(yc.Fingerprint.UserAgent) != "" {
 			config.FP.UserAgent = yc.Fingerprint.UserAgent
 		}
@@ -268,6 +273,7 @@ func applyEnvOverrides(config *Config) {
 	config.SystemPromptInject = getEnv("SYSTEM_PROMPT_INJECT", config.SystemPromptInject)
 	config.Timeout = getEnvAsInt("TIMEOUT", config.Timeout)
 	config.MaxInputLength = getEnvAsInt("MAX_INPUT_LENGTH", config.MaxInputLength)
+	config.EnableThinking = getEnvAsBool("ENABLE_THINKING", config.EnableThinking)
 	config.FP.UserAgent = getEnv("USER_AGENT", config.FP.UserAgent)
 
 	config.Vision.Enabled = getEnvAsBool("VISION_ENABLED", config.Vision.Enabled)
@@ -308,10 +314,37 @@ func visionKeyExists(data []byte) bool {
 }
 
 // GetModels 获取模型列表
+// GetModels 获取模型列表（自动展开 -thinking 变体）
 func (c *Config) GetModels() []string {
-	models := strings.Split(c.Models, ",")
-	result := make([]string, 0, len(models))
-	for _, model := range models {
+	raw := strings.Split(c.Models, ",")
+	base := make([]string, 0, len(raw))
+	for _, model := range raw {
+		if trimmed := strings.TrimSpace(model); trimmed != "" {
+			base = append(base, trimmed)
+		}
+	}
+	// Auto-expand: for each model, also expose a -thinking variant
+	seen := map[string]bool{}
+	result := make([]string, 0, len(base)*2)
+	for _, m := range base {
+		if !seen[m] {
+			result = append(result, m)
+			seen[m] = true
+		}
+		thinking := m + "-thinking"
+		if !seen[thinking] {
+			result = append(result, thinking)
+			seen[thinking] = true
+		}
+	}
+	return result
+}
+
+// GetBaseModels 获取基础模型列表（不含 -thinking 变体），用于内部映射
+func (c *Config) GetBaseModels() []string {
+	raw := strings.Split(c.Models, ",")
+	result := make([]string, 0, len(raw))
+	for _, model := range raw {
 		if trimmed := strings.TrimSpace(model); trimmed != "" {
 			result = append(result, trimmed)
 		}

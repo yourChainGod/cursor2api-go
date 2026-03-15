@@ -121,9 +121,10 @@ type OpenAIChatChoice struct {
 }
 
 type OpenAIAssistantText struct {
-	Role      string           `json:"role"`
-	Content   interface{}      `json:"content"`
-	ToolCalls []OpenAIToolCall `json:"tool_calls,omitempty"`
+	Role             string           `json:"role"`
+	Content          interface{}      `json:"content"`
+	ReasoningContent interface{}      `json:"reasoning_content,omitempty"`
+	ToolCalls        []OpenAIToolCall `json:"tool_calls,omitempty"`
 }
 
 type OpenAIUsage struct {
@@ -147,9 +148,10 @@ type OpenAIStreamChoice struct {
 }
 
 type OpenAIStreamDelta struct {
-	Role      string                 `json:"role,omitempty"`
-	Content   interface{}            `json:"content,omitempty"`
-	ToolCalls []OpenAIStreamToolCall `json:"tool_calls,omitempty"`
+	Role             string                 `json:"role,omitempty"`
+	Content          interface{}            `json:"content,omitempty"`
+	ReasoningContent interface{}            `json:"reasoning_content,omitempty"`
+	ToolCalls        []OpenAIStreamToolCall `json:"tool_calls,omitempty"`
 }
 
 type OpenAIStreamToolCall struct {

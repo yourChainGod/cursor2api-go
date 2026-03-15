@@ -36,9 +36,9 @@ func setupTestRouterWithHandler(h *Handler) *gin.Engine {
 	r := gin.New()
 	v1 := r.Group("/v1")
 	{
-		v1.POST("/messages", middleware.AuthRequired(), h.Messages)
-		v1.POST("/chat/completions", middleware.AuthRequired(), h.ChatCompletions)
-		v1.POST("/responses", middleware.AuthRequired(), h.Responses)
+		v1.POST("/messages", middleware.AuthRequired("test-key"), h.Messages)
+		v1.POST("/chat/completions", middleware.AuthRequired("test-key"), h.ChatCompletions)
+		v1.POST("/responses", middleware.AuthRequired("test-key"), h.Responses)
 	}
 	return r
 }

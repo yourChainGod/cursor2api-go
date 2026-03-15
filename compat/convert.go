@@ -12,7 +12,24 @@ import (
 	"cursor2api-go/utils"
 )
 
-const maxToolResultLength = 30000
+// maxToolResultLengthForContext returns a dynamic tool-result budget based on
+// the estimated total context size (in characters). Mirrors 7836246/cursor2api:
+//   - context ≤ 30K  → 15000
+//   - context ≤ 60K  → 10000
+//   - context ≤ 100K → 6000
+//   - context > 100K → 4000
+func maxToolResultLengthForContext(contextChars int) int {
+	switch {
+	case contextChars <= 30000:
+		return 15000
+	case contextChars <= 60000:
+		return 10000
+	case contextChars <= 100000:
+		return 6000
+	default:
+		return 4000
+	}
+}
 
 const thinkingHintBase = "Extended thinking mode is enabled. Before your final answer, place your reasoning inside <thinking>...</thinking> tags. After the closing </thinking> tag, continue with the normal assistant response."
 
@@ -176,6 +193,7 @@ func ConvertAnthropicToCursorRequest(req *AnthropicRequest, cfg *config.Config) 
 	thinkingEnabled := req.Thinking != nil && strings.EqualFold(req.Thinking.Type, "enabled") && len(req.Tools) == 0 // suppress thinking in tools mode
 	lastUserIndex := lastUserMessageIndex(req.Messages)
 	systemText := extractSystemText(req.System)
+	systemText = sanitizeSystemPrompt(systemText)
 	if strings.TrimSpace(cfg.SystemPromptInject) != "" {
 		if systemText != "" {
 			systemText += "\n\n" + cfg.SystemPromptInject
@@ -284,8 +302,8 @@ func ConvertAnthropicToCursorRequest(req *AnthropicRequest, cfg *config.Config) 
 // payload size exceeds limitChars. The first protectedHead messages (system
 // prompt / tool instructions / few-shot) and the last protectedTail messages
 // are always kept.
-// Strategy (mirrors 7836246/cursor2api):
-//  1. Keep the last 6 messages fully intact.
+// Strategy:
+//  1. Keep the last 10 messages fully intact.
 //  2. Truncate text of older middle messages to 500 chars each.
 //  3. If still over limit, drop oldest middle messages entirely.
 func trimMessagesToLimit(messages []models.CursorMessage, limitChars int) []models.CursorMessage {
@@ -308,9 +326,9 @@ func trimMessagesToLimit(messages []models.CursorMessage, limitChars int) []mode
 		return messages
 	}
 
-	const protectedHead = 2   // system+fewshot or reframing
-	const protectedTail = 6   // keep last 6 messages fully intact
-	const truncateOldTo = 500 // truncate old middle messages to this many chars
+	const protectedHead = 2    // system+fewshot or reframing
+	const protectedTail = 10   // keep last 10 messages fully intact (preserves current task context)
+	const truncateOldTo = 500  // truncate old middle messages to this many chars
 
 	if len(messages) <= protectedHead+protectedTail {
 		return messages
@@ -321,23 +339,19 @@ func trimMessagesToLimit(messages []models.CursorMessage, limitChars int) []mode
 	middle := make([]models.CursorMessage, len(messages)-protectedHead-protectedTail)
 	copy(middle, messages[protectedHead:len(messages)-protectedTail])
 
-	// Step 1: compress old middle messages safely.
-	// Do NOT inject partial code like "...[truncated]" into historical content,
-	// otherwise the model may copy that literal marker into new tool arguments.
-	for i := range middle {
-		for j := range middle[i].Parts {
-			if len(middle[i].Parts[j].Text) > truncateOldTo {
-				switch middle[i].Role {
-				case "assistant":
-					middle[i].Parts[j].Text = "[Earlier assistant output omitted for size. Preserve current task and rely on recent context.]"
-				case "user":
-					middle[i].Parts[j].Text = "[Earlier user message omitted for size. Preserve the current task and recent context.]"
-				default:
-					middle[i].Parts[j].Text = "[Earlier context omitted for size.]"
-				}
-			}
+	// Step 1: drop middle messages that exceed truncateOldTo chars.
+	// No placeholders — placeholders leak into context and confuse the model.
+	trimmed := make([]models.CursorMessage, 0, len(middle))
+	for _, m := range middle {
+		totalLen := 0
+		for _, p := range m.Parts {
+			totalLen += len(p.Text)
+		}
+		if totalLen <= truncateOldTo {
+			trimmed = append(trimmed, m)
 		}
 	}
+	middle = trimmed
 
 	// Step 2: drop oldest middle messages until we fit
 	for estSize(head)+estSize(middle)+estSize(tail) > limitChars && len(middle) > 0 {
@@ -356,17 +370,35 @@ func buildToolInstructions(tools []AnthropicTool, hasCommunicationTool bool, too
 		return ""
 	}
 
+	// Aggressive compression for large tool sets (>25 tools).
+	// Mirrors 7836246/cursor2api: reduce schema from ~135K to ~15K.
+	aggressiveMode := len(tools) > 25
+
 	items := make([]string, 0, len(tools))
 	for _, tool := range tools {
 		desc := strings.TrimSpace(tool.Description)
 		if desc == "" {
 			desc = "No description"
 		}
-		if len(desc) > 200 {
-			desc = desc[:200]
+		if aggressiveMode {
+			// In aggressive mode: truncate descriptions to 80 chars and skip schema details
+			if len(desc) > 80 {
+				desc = desc[:80] + "…"
+			}
+			// Only show required parameter names, no types
+			required := extractRequiredParams(tool.InputSchema)
+			if len(required) > 0 {
+				items = append(items, fmt.Sprintf("- **%s**: %s (requires: %s)", tool.Name, desc, strings.Join(required, ", ")))
+			} else {
+				items = append(items, fmt.Sprintf("- **%s**: %s", tool.Name, desc))
+			}
+		} else {
+			if len(desc) > 200 {
+				desc = desc[:200]
+			}
+			schema := compactSchema(tool.InputSchema)
+			items = append(items, fmt.Sprintf("- **%s**: %s\n  Params: %s", tool.Name, desc, schema))
 		}
-		schema := compactSchema(tool.InputSchema)
-		items = append(items, fmt.Sprintf("- **%s**: %s\n  Params: %s", tool.Name, desc, schema))
 	}
 
 	forceConstraint := ""
@@ -473,6 +505,25 @@ func compactSchema(schema map[string]interface{}) string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
+// extractRequiredParams returns just the required parameter names from a JSON Schema.
+// Used in aggressive compression mode for large tool sets.
+func extractRequiredParams(schema map[string]interface{}) []string {
+	if len(schema) == 0 {
+		return nil
+	}
+	rawRequired, ok := schema["required"].([]interface{})
+	if !ok || len(rawRequired) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(rawRequired))
+	for _, item := range rawRequired {
+		if s, ok := item.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
 func hasCommunicationTool(tools []AnthropicTool) bool {
 	for _, tool := range tools {
 		switch tool.Name {
@@ -504,8 +555,14 @@ func isHistoricalRefusalText(text string) bool {
 	return false
 }
 
+// stripSystemReminders removes <system-reminder> blocks from any message text.
+// These are injected by the Claude Code framework and leak context about the
+// infrastructure, causing Cursor's backend to refuse the request.
+var systemReminderRe = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>\s*`)
+
 func extractAnthropicMessageText(msg AnthropicMessage) string {
-	return extractBlockText(msg.Content)
+	text := extractBlockText(msg.Content)
+	return systemReminderRe.ReplaceAllString(text, "")
 }
 
 func extractBlockText(content interface{}) string {
@@ -557,6 +614,54 @@ func extractBlockText(content interface{}) string {
 	}
 }
 
+// sanitizeSystemPrompt removes Claude Code / Anthropic SDK metadata markers
+// from the system prompt to prevent Cursor's backend from detecting and rejecting
+// the request. These markers are injected by clients (e.g., Claude Code CLI) and
+// are not useful for the actual AI task.
+var systemPromptCleanupPatterns []*regexp.Regexp
+
+func init() {
+	rawPatterns := []string{
+		// Anthropic billing / SDK headers leaked into system prompt
+		`(?m)^.*x-anthropic-billing-header.*$\n?`,
+		`(?m)^.*cc_version=.*$\n?`,
+		`(?m)^.*x-stainless-.*$\n?`,
+		// Claude Code identity markers
+		`(?i)You are Claude Code,? Anthropic'?s official CLI for Claude\.?`,
+		`(?i)You are Claude Code\.`,
+		`(?i)You are powered by the model named .*?\.\s*The exact model ID is .*?\.`,
+		`(?i)The most recent Claude model family is .*?\.`,
+		`(?i)Assistant knowledge cutoff is .*?\.`,
+		// System reminders / tags injected by the framework
+		`(?s)<system-reminder>.*?</system-reminder>\s*`,
+		`(?s)<available-deferred-tools>.*?</available-deferred-tools>\s*`,
+		`(?s)<fast_mode_info>.*?</fast_mode_info>\s*`,
+		// Hooks and permission mode references
+		`(?m)^.*permission mode.*$\n?`,
+		`(?m)^.*user-prompt-submit-hook.*$\n?`,
+		// Memory directory references
+		`(?m)^.*persistent auto memory directory.*$\n?`,
+		`(?m)^.*\.claude/.*memory.*$\n?`,
+	}
+	systemPromptCleanupPatterns = make([]*regexp.Regexp, 0, len(rawPatterns))
+	for _, p := range rawPatterns {
+		systemPromptCleanupPatterns = append(systemPromptCleanupPatterns, regexp.MustCompile(p))
+	}
+}
+
+func sanitizeSystemPrompt(text string) string {
+	if text == "" {
+		return text
+	}
+	result := text
+	for _, re := range systemPromptCleanupPatterns {
+		result = re.ReplaceAllString(result, "")
+	}
+	// Collapse multiple blank lines left by the removals
+	result = regexp.MustCompile(`\n{3,}`).ReplaceAllString(result, "\n\n")
+	return strings.TrimSpace(result)
+}
+
 func extractSystemText(system interface{}) string {
 	switch v := system.(type) {
 	case string:
@@ -595,6 +700,9 @@ func hasToolResultBlock(msg AnthropicMessage) bool {
 }
 
 func extractToolResultNatural(msg AnthropicMessage) string {
+	// Estimate total context size from this message to choose a dynamic budget.
+	contextEstimate := len(extractAnthropicMessageText(msg))
+	budget := maxToolResultLengthForContext(contextEstimate * 4) // rough: one msg ~ 1/4 of context
 	parts := make([]string, 0)
 
 	switch items := msg.Content.(type) {
@@ -603,8 +711,8 @@ func extractToolResultNatural(msg AnthropicMessage) string {
 			switch block.Type {
 			case "tool_result":
 				result := extractToolResultText(block.Content)
-				if runeCount(result) > maxToolResultLength {
-					result = truncateRunes(result, maxToolResultLength) + fmt.Sprintf("\n\n... (truncated, %d chars total)", runeCount(result))
+				if runeCount(result) > budget {
+					result = truncateRunes(result, budget) + fmt.Sprintf("\n\n... (truncated, %d chars total)", runeCount(result))
 				}
 				if block.IsError {
 					parts = append(parts, "The action encountered an error:\n"+result)
@@ -627,8 +735,8 @@ func extractToolResultNatural(msg AnthropicMessage) string {
 			switch blockType {
 			case "tool_result":
 				result := extractToolResultText(block["content"])
-				if runeCount(result) > maxToolResultLength {
-					result = truncateRunes(result, maxToolResultLength) + fmt.Sprintf("\n\n... (truncated, %d chars total)", runeCount(result))
+				if runeCount(result) > budget {
+					result = truncateRunes(result, budget) + fmt.Sprintf("\n\n... (truncated, %d chars total)", runeCount(result))
 				}
 				if boolValue(block["is_error"]) {
 					parts = append(parts, "The action encountered an error:\n"+result)

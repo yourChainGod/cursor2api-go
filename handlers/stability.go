@@ -479,15 +479,24 @@ func (h *Handler) executeAnthropicRequest(ctx context.Context, body *compat.Anth
 
 	originalMessages := append([]models.CursorMessage{}, activeCursorReq.Messages...)
 
-	// Tiered truncation recovery (tools mode only):
-	// Tier 1-2: guide model to split output into smaller chunks
-	// Tier 3-4: traditional continuation as last resort
+	// Tiered truncation recovery:
+	// Tools mode: Tier 1-2 (guide model to split), Tier 3-4 (traditional continuation)
+	// Non-tools mode: Tier 3-4 only (traditional continuation, up to 2 passes)
 	// Skip tier loop entirely if the response already contains a complete tool call.
 	hasCompleteTool := func(text string) bool {
 		calls, _ := compat.ParseToolCalls(text)
 		return len(calls) > 0
 	}
-	for tier := 1; hasTools && isTruncated(result.Text) && !hasCompleteTool(result.Text) && tier <= 4; tier++ {
+	maxTier := 4
+	startTier := 1
+	if !hasTools {
+		// For non-tools mode: only use traditional continuation (tiers 3-4)
+		startTier = 3
+	}
+	for tier := startTier; isTruncated(result.Text) && tier <= maxTier; tier++ {
+		if hasTools && hasCompleteTool(result.Text) {
+			break // tool response is complete, stop recovering
+		}
 		if tier <= 2 {
 			// Tier 1-2: Strategy guidance — ask model to split into smaller blocks
 			var tierPrompt string

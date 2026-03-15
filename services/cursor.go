@@ -101,12 +101,34 @@ func (s *CursorService) ChatCompletionWithCursorRequest(ctx context.Context, pay
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// 添加详细的调试日志
 		headers := s.chatHeaders()
-		logrus.WithFields(logrus.Fields{
+		logFields := logrus.Fields{
 			"url":            cursorAPIURL,
 			"payload_length": len(jsonPayload),
 			"model":          payload.Model,
 			"attempt":        attempt,
-		}).Debug("Sending request to Cursor API")
+			"msg_count":      len(payload.Messages),
+		}
+		// In debug mode, log each message's role and text length for diagnostics
+		if logrus.IsLevelEnabled(logrus.DebugLevel) {
+			for i, msg := range payload.Messages {
+				textLen := 0
+				for _, p := range msg.Parts {
+					textLen += len(p.Text)
+				}
+				preview := ""
+				for _, p := range msg.Parts {
+					if len(p.Text) > 0 {
+						preview = p.Text
+						if len(preview) > 120 {
+							preview = preview[:120]
+						}
+						break
+					}
+				}
+				logFields[fmt.Sprintf("msg[%d]", i)] = fmt.Sprintf("%s(%d): %s", msg.Role, textLen, preview)
+			}
+		}
+		logrus.WithFields(logFields).Debug("Sending request to Cursor API")
 
 		resp, err := s.client.R().
 			SetContext(ctx).

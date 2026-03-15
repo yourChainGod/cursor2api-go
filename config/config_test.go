@@ -182,14 +182,15 @@ func TestGetModels(t *testing.T) {
 	}
 
 	models := config.GetModels()
-	expected := []string{"gpt-4o", "claude-3", "gpt-3.5"}
+	// GetModels now auto-expands with -thinking variants
+	expected := []string{"gpt-4o", "gpt-4o-thinking", "claude-3", "claude-3-thinking", "gpt-3.5", "gpt-3.5-thinking"}
 
 	if len(models) != len(expected) {
 		t.Errorf("GetModels() length = %v, want %v", len(models), len(expected))
 	}
 
 	for i, model := range models {
-		if model != expected[i] {
+		if i < len(expected) && model != expected[i] {
 			t.Errorf("GetModels()[%d] = %v, want %v", i, model, expected[i])
 		}
 	}

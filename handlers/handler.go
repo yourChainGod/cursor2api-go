@@ -94,6 +94,21 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 	}
 
 	anthropicReq := compat.ConvertOpenAIToAnthropic(&body)
+
+	// Auto-enable thinking when model name ends with "-thinking"
+	if models.IsThinkingModel(body.Model) {
+		body.Model = models.BaseModelID(body.Model)
+		anthropicReq.Model = body.Model
+		if anthropicReq.Thinking == nil {
+			anthropicReq.Thinking = &compat.ThinkingConfig{Type: "enabled", BudgetTokens: 10000}
+		}
+	}
+
+	// Global enable_thinking config: auto-enable if not explicitly set in request
+	if h.config.EnableThinking && anthropicReq.Thinking == nil {
+		anthropicReq.Thinking = &compat.ThinkingConfig{Type: "enabled", BudgetTokens: 10000}
+	}
+
 	if isIdentityProbe(anthropicReq) {
 		if body.Stream {
 			h.handleOpenAIMockStream(c, &body, claudeMockIdentityResponse)
@@ -122,6 +137,19 @@ func (h *Handler) Messages(c *gin.Context) {
 	}
 	if body.MaxTokens <= 0 {
 		body.MaxTokens = 8192
+	}
+
+	// Auto-enable thinking when model name ends with "-thinking"
+	if models.IsThinkingModel(body.Model) {
+		body.Model = models.BaseModelID(body.Model)
+		if body.Thinking == nil {
+			body.Thinking = &compat.ThinkingConfig{Type: "enabled", BudgetTokens: 10000}
+		}
+	}
+
+	// Global enable_thinking config: auto-enable if not explicitly set in request
+	if h.config.EnableThinking && body.Thinking == nil {
+		body.Thinking = &compat.ThinkingConfig{Type: "enabled", BudgetTokens: 10000}
 	}
 
 	if isIdentityProbe(&body) {
@@ -323,14 +351,19 @@ func (h *Handler) streamAnthropic(c *gin.Context, body *compat.AnthropicRequest)
 				stopReason := "end_turn"
 				if toolSeen {
 					stopReason = "tool_use"
-				} else if len(body.Tools) > 0 && isTruncated(result.Text) {
-					// Stream truncation recovery: attempt up to 2 continuation passes
+				}
+
+				// Stream truncation recovery: attempt up to 2 continuation passes.
+				// Apply to tool mode when the output is truncated, even if a partial
+				// tool call was already seen (the tool JSON itself may be cut off).
+				if len(body.Tools) > 0 && isTruncated(result.Text) {
 					for contPass := 0; contPass < 2 && isTruncated(result.Text); contPass++ {
 						savedText := result.Text
 						continueReq := compat.ConvertAnthropicToCursorRequest(body, h.config)
+						anchorText := tailString(result.Text, 300)
 						continueReq.Messages = append(continueReq.Messages,
 							models.CursorMessage{Role: "assistant", Parts: []models.CursorPart{{Type: "text", Text: result.Text}}},
-							models.CursorMessage{Role: "user", Parts: []models.CursorPart{{Type: "text", Text: "Your response was cut off. Continue exactly from where you left off, starting with the next character."}}},
+							models.CursorMessage{Role: "user", Parts: []models.CursorPart{{Type: "text", Text: fmt.Sprintf("Output cut off. Last part:\n```\n...%s\n```\nContinue exactly from the cut-off point, starting with the next character. Do not repeat any content.", anchorText)}}},
 						)
 						contGen, contErr := h.cursorService.ChatCompletionWithCursorRequest(c.Request.Context(), &continueReq)
 						if contErr != nil {
@@ -346,11 +379,27 @@ func (h *Handler) streamAnthropic(c *gin.Context, body *compat.AnthropicRequest)
 						if strings.TrimSpace(deduped) == "" {
 							break
 						}
-						// emit the continuation chunk to the already-open stream
-						emitText(deduped)
+						// Feed the continuation through the parser to detect any newly
+						// completed tool calls or text in the joined output.
+						parser.Feed(deduped)
+						parser.Finish()
+						emitSegments(parser.ConsumeEvents())
+						closeText()
 						result.Text += deduped
+						fullText.WriteString(deduped)
 					}
-					stopReason = "end_turn"
+					// Re-evaluate stop reason after continuation
+					if !toolSeen {
+						newCalls, _ := compat.ParseToolCalls(result.Text)
+						if len(newCalls) > 0 {
+							toolSeen = true
+						}
+					}
+					if toolSeen {
+						stopReason = "tool_use"
+					} else {
+						stopReason = "end_turn"
+					}
 				}
 				writeAnthropicSSE(c, "message_delta", gin.H{"type": "message_delta", "delta": gin.H{"stop_reason": stopReason, "stop_sequence": nil}, "usage": gin.H{"output_tokens": estimateOutputTokens(result)}})
 				writeAnthropicSSE(c, "message_stop", gin.H{"type": "message_stop"})
@@ -381,6 +430,33 @@ func (h *Handler) nonStreamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest
 
 	finishReason := "stop"
 	message := compat.OpenAIAssistantText{Role: "assistant", Content: sanitizeResponse(result.Text)}
+
+	// Extract thinking blocks and expose as reasoning_content in OpenAI format
+	thinkingEnabled := anthropicReq.Thinking != nil && strings.EqualFold(anthropicReq.Thinking.Type, "enabled")
+	if thinkingEnabled {
+		segments := compat.ParseResponseSegments(result.Text)
+		var thinkingParts []string
+		var textParts []string
+		for _, seg := range segments {
+			switch seg.Type {
+			case "thinking":
+				if strings.TrimSpace(seg.Thinking) != "" {
+					thinkingParts = append(thinkingParts, seg.Thinking)
+				}
+			case "text":
+				if strings.TrimSpace(seg.Text) != "" {
+					textParts = append(textParts, seg.Text)
+				}
+			}
+		}
+		if len(thinkingParts) > 0 {
+			message.ReasoningContent = strings.Join(thinkingParts, "\n\n")
+		}
+		if len(textParts) > 0 {
+			message.Content = sanitizeResponse(strings.Join(textParts, ""))
+		}
+	}
+
 	if len(body.Tools) > 0 {
 		toolCalls, cleanText := compat.ParseToolCalls(result.Text)
 		if len(toolCalls) > 0 {
@@ -455,7 +531,9 @@ func (h *Handler) streamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, a
 		return
 	}
 
-	parser := compat.NewStreamResponseParser(len(body.Tools) > 0, false)
+	// Enable thinking in the stream parser if the Anthropic request has thinking enabled.
+	thinkingEnabled := anthropicReq.Thinking != nil && strings.EqualFold(anthropicReq.Thinking.Type, "enabled")
+	parser := compat.NewStreamResponseParser(len(body.Tools) > 0, thinkingEnabled)
 	var fullText bytes.Buffer
 	var openaiSanitizeBuf strings.Builder
 	var toolSeen bool
@@ -486,6 +564,11 @@ func (h *Handler) streamOpenAI(c *gin.Context, body *compat.OpenAIChatRequest, a
 			case "text":
 				openaiSanitizeBuf.WriteString(seg.Text)
 				flushOpenAISanitized(false)
+			case "thinking":
+				// Expose thinking as reasoning_content in OpenAI streaming format
+				if strings.TrimSpace(seg.Thinking) != "" {
+					writeOpenAISSE(c, compat.OpenAIChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: body.Model, Choices: []compat.OpenAIStreamChoice{{Index: 0, Delta: compat.OpenAIStreamDelta{ReasoningContent: seg.Thinking}, FinishReason: nil}}})
+				}
 			case "tool_use":
 				if seg.ToolCall == nil {
 					continue

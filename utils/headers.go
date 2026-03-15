@@ -41,7 +41,7 @@ type BrowserProfile struct {
 
 var (
 	// 常见的浏览器版本 (Chrome)
-	chromeVersions = []int{120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130}
+	chromeVersions = []int{131, 132, 133, 134, 135, 136, 137, 138, 139, 140}
 
 	// Windows 平台配置
 	windowsProfiles = []BrowserProfile{

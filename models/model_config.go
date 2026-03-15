@@ -20,6 +20,8 @@
 
 package models
 
+import "strings"
+
 // ModelConfig 模型配置结构
 type ModelConfig struct {
 	ID            string `json:"id"`
@@ -63,11 +65,50 @@ func GetModelConfigs() map[string]ModelConfig {
 	}
 }
 
-// GetModelConfig 获取指定模型的配置
+// GetModelConfig 获取指定模型的配置。
+// 支持 `-thinking` 后缀：自动剥离后查找基础模型。
 func GetModelConfig(modelID string) (ModelConfig, bool) {
 	configs := GetModelConfigs()
-	config, exists := configs[modelID]
-	return config, exists
+	if config, exists := configs[modelID]; exists {
+		return config, exists
+	}
+	// Strip -thinking suffix and try again
+	base := strings.TrimSuffix(modelID, "-thinking")
+	if base != modelID {
+		if config, exists := configs[base]; exists {
+			return config, exists
+		}
+	}
+	return ModelConfig{}, false
+}
+
+// IsThinkingModel returns true if the model ID ends with "-thinking".
+func IsThinkingModel(modelID string) bool {
+	return strings.HasSuffix(modelID, "-thinking")
+}
+
+// BaseModelID strips the "-thinking" suffix if present.
+func BaseModelID(modelID string) string {
+	return strings.TrimSuffix(modelID, "-thinking")
+}
+
+// ExpandModelsWithThinking takes a list of model IDs and appends
+// "-thinking" variants for each, deduplicating.
+func ExpandModelsWithThinking(models []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(models)*2)
+	for _, m := range models {
+		if !seen[m] {
+			result = append(result, m)
+			seen[m] = true
+		}
+		thinking := m + "-thinking"
+		if !seen[thinking] {
+			result = append(result, thinking)
+			seen[thinking] = true
+		}
+	}
+	return result
 }
 
 // GetCursorModel 获取Cursor API使用的模型名称

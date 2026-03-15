@@ -23,14 +23,20 @@ package middleware
 import (
 	"cursor2api-go/models"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-// AuthRequired 认证中间件
-func AuthRequired() gin.HandlerFunc {
+// AuthRequired 认证中间件。接收 Config 中已解析的 API Key，
+// 确保 YAML / .env / 环境变量三种来源的 key 都能正确校验。
+func AuthRequired(configuredAPIKey ...string) gin.HandlerFunc {
+	// 从可变参数取出已解析的 key；若未传入则回退到 "0000"
+	expectedToken := "0000"
+	if len(configuredAPIKey) > 0 && strings.TrimSpace(configuredAPIKey[0]) != "" {
+		expectedToken = configuredAPIKey[0]
+	}
+
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		token := ""
@@ -60,10 +66,6 @@ func AuthRequired() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, errorResponse)
 			c.Abort()
 			return
-		}
-		expectedToken := os.Getenv("API_KEY")
-		if expectedToken == "" {
-			expectedToken = "0000" // 默认值
 		}
 
 		if token != expectedToken {

@@ -56,12 +56,17 @@ func main() {
 	}
 
 	// 注册路由
-	setupRoutes(router, handler)
+	setupRoutes(router, handler, cfg)
 
 	// 创建HTTP服务器
+	// Disable fixed timeouts: streaming AI responses can take minutes.
+	// Use idle timeouts instead — connections are closed only when idle.
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Port),
-		Handler: router,
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           router,
+		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		// WriteTimeout = 0 (disabled) to avoid killing long-running SSE streams
 	}
 
 	// 打印启动信息
@@ -80,8 +85,8 @@ func main() {
 	<-quit
 	logrus.Info("Shutting down server...")
 
-	// 给服务器5秒时间完成处理正在进行的请求
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 给服务器30秒时间完成处理正在进行的请求（流式请求需要更长时间）
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
 		logrus.Fatalf("Server forced to shutdown: %v", err)
@@ -90,14 +95,9 @@ func main() {
 	logrus.Info("Server exited")
 }
 
-func setupRoutes(router *gin.Engine, handler *handlers.Handler) {
-	// 健康检查
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
-			"time":   time.Now().Unix(),
-		})
-	})
+func setupRoutes(router *gin.Engine, handler *handlers.Handler, cfg *config.Config) {
+	// 健康检查 — 统一使用 handler.Health
+	router.GET("/health", handler.Health)
 
 	// API文档页面
 	router.GET("/", handler.ServeDocs)
@@ -106,21 +106,21 @@ func setupRoutes(router *gin.Engine, handler *handlers.Handler) {
 	v1 := router.Group("/v1")
 	{
 		// 模型列表
-		v1.GET("/models", middleware.AuthRequired(), handler.ListModels)
+		v1.GET("/models", middleware.AuthRequired(cfg.APIKey), handler.ListModels)
 
 		// OpenAI Chat Completions
-		v1.POST("/chat/completions", middleware.AuthRequired(), handler.ChatCompletions)
-		router.POST("/chat/completions", middleware.AuthRequired(), handler.ChatCompletions)
+		v1.POST("/chat/completions", middleware.AuthRequired(cfg.APIKey), handler.ChatCompletions)
+		router.POST("/chat/completions", middleware.AuthRequired(cfg.APIKey), handler.ChatCompletions)
 
 		// Anthropic Messages API
-		v1.POST("/messages", middleware.AuthRequired(), handler.Messages)
-		router.POST("/messages", middleware.AuthRequired(), handler.Messages)
-		v1.POST("/messages/count_tokens", middleware.AuthRequired(), handler.CountTokens)
-		router.POST("/messages/count_tokens", middleware.AuthRequired(), handler.CountTokens)
+		v1.POST("/messages", middleware.AuthRequired(cfg.APIKey), handler.Messages)
+		router.POST("/messages", middleware.AuthRequired(cfg.APIKey), handler.Messages)
+		v1.POST("/messages/count_tokens", middleware.AuthRequired(cfg.APIKey), handler.CountTokens)
+		router.POST("/messages/count_tokens", middleware.AuthRequired(cfg.APIKey), handler.CountTokens)
 
 		// OpenAI Responses API (Cursor IDE agent mode)
-		v1.POST("/responses", middleware.AuthRequired(), handler.Responses)
-		router.POST("/responses", middleware.AuthRequired(), handler.Responses)
+		v1.POST("/responses", middleware.AuthRequired(cfg.APIKey), handler.Responses)
+		router.POST("/responses", middleware.AuthRequired(cfg.APIKey), handler.Responses)
 	}
 
 	// 静态文件服务（如果需要）
@@ -163,6 +163,12 @@ func printStartupBanner(cfg *config.Config) {
 
 	if cfg.Debug {
 		fmt.Println("\n🐛 调试模式:  已启用")
+	}
+	if cfg.EnableThinking {
+		fmt.Println("🧠 全局 Thinking: 已启用")
+	}
+	if cfg.Vision.Enabled {
+		fmt.Printf("👁  Vision 模式:  %s (模型: %s)\n", cfg.Vision.Mode, cfg.Vision.Model)
 	}
 
 	fmt.Println("\n✨ 服务已启动，按 Ctrl+C 停止")

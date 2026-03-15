@@ -59,7 +59,8 @@
 
 ## 🤖 支持的模型
 
-- **Anthropic Claude**: claude-sonnet-4.6
+- **Anthropic Claude**: claude-sonnet-4.6（及所有配置的模型）
+- **Thinking 变体**: 每个模型自动生成 `*-thinking` 变体（如 `claude-sonnet-4.6-thinking`），请求时自动启用扩展推理
 
 ## 🚀 快速开始
 
@@ -97,28 +98,13 @@ go build -o cursor2api-go .
 ./cursor2api-go
 ```
 
-
-# 编译
-go build -o cursor2api-go
-
-# 运行
-./cursor2api-go
-```
-
-#### 方法二：使用 go run
+### 方法三：使用 Docker（推荐生产部署）
 
 ```bash
-git clone https://github.com/libaxuan/cursor2api-go.git
-cd cursor2api-go
-go run .
+docker compose up -d
 ```
 
-#### 方法三：使用 Makefile
-
-```bash
-make build
-make run
-```
+详见 `docker-compose.yml`。
 
 服务将在 `http://localhost:8002` 启动
 
@@ -276,26 +262,23 @@ cp .env.example .env
 | `MAX_INPUT_LENGTH` | `200000` | 历史消息裁剪阈值（按字符近似） |
 | `PROXY` | `` | 可选代理（支持 http/https/socks5） |
 | `USER_AGENT` | `Mozilla/5.0 ... Chrome/140...` | 覆盖默认浏览器指纹 UA |
-| `VISION_ENABLED` | `false` | 是否启用图片预处理 / OCR |
-| `VISION_MODE` | `ocr` | `ocr`（本地 Tesseract / gosseract）或 `api`（外部视觉模型） |
-| `VISION_LANGUAGES` | `eng,chi_sim` | 本地 OCR 语言列表（逗号分隔） |
+| `VISION_ENABLED` | `false` | 是否启用图片预处理（通过外部 Vision API） |
+| `VISION_MODE` | `api` | 图片处理模式（仅支持 `api`，本地 OCR 已移除） |
 | `VISION_BASE_URL` | `https://api.openai.com/v1/chat/completions` | 外部视觉 API 地址 |
-| `VISION_API_KEY` | `` | 外部视觉 API Key（`VISION_MODE=api` 时必填） |
+| `VISION_API_KEY` | `` | 外部视觉 API Key（`VISION_ENABLED=true` 时必填） |
 | `VISION_MODEL` | `gpt-4o-mini` | 外部视觉模型名 |
+| `ENABLE_THINKING` | `false` | 全局启用扩展推理模式（也可通过请求参数或 `-thinking` 模型名按请求控制） |
 
-### 图片 / OCR
+### 图片预处理
 
-Go 版现已支持将图片输入在发送到 Cursor Web 前先做预处理：
-
-- `VISION_MODE=ocr`：通过本地 Tesseract + `gosseract` 做 OCR（默认推荐）
-- `VISION_MODE=api`：转发到外部视觉模型接口
+Go 版支持将图片输入在发送到 Cursor Web 前通过外部 Vision API 做预处理：
 
 示例：
 
 ```bash
 VISION_ENABLED=true \
-VISION_MODE=ocr \
-VISION_LANGUAGES=eng,chi_sim \
+VISION_MODE=api \
+VISION_API_KEY=your-key \
 ./cursor2api-go
 ```
 
@@ -345,8 +328,6 @@ go test ./...
 # 或
 make self-check
 ```
-
-当 `VISION_ENABLED=true && VISION_MODE=ocr` 时，服务启动也会自动执行本地 OCR 自检；若 Tesseract 或语言包缺失，会直接明确报错并阻止启动。
 
 ### 运行 live smoke
 

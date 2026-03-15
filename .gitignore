@@ -23,6 +23,8 @@ go.work
 .env
 .env.local
 .env.*.local
+config.yaml
+config.yml
 
 # IDE files
 .vscode/
